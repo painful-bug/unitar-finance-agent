@@ -1,0 +1,77 @@
+[
+  {
+    "id": "july_groceries_total",
+    "prompts": ["How much did I spend on groceries in July 2026?"],
+    "expected_amounts": ["690.65"],
+    "expected_keywords": ["groceries"]
+  },
+  {
+    "id": "june_dining_total",
+    "prompts": ["What was my dining spend in June 2026?"],
+    "expected_amounts": ["450.00"],
+    "expected_keywords": ["dining"]
+  },
+  {
+    "id": "july_dining_over_budget",
+    "prompts": ["Was I over my dining budget in July 2026?"],
+    "expected_amounts": ["560.00", "500.00"],
+    "expected_keywords": ["over"]
+  },
+  {
+    "id": "july_groceries_within_budget",
+    "prompts": ["Check the groceries budget rule for July 2026."],
+    "expected_amounts": ["690.65", "800.00"],
+    "expected_keywords": ["within"]
+  },
+  {
+    "id": "july_savings_rate",
+    "prompts": ["What was my savings rate in July 2026?"],
+    "expected_amounts": ["36.99"],
+    "expected_keywords": ["savings"]
+  },
+  {
+    "id": "zero_income",
+    "prompts": ["What was my savings rate in July 2026?"],
+    "expected_amounts": [],
+    "expected_keywords": ["unavailable"],
+    "csv_text": "date,kind,category,amount,merchant\n2026-07-01,expense,dining,50.00,Cafe\n"
+  },
+  {
+    "id": "missing_month",
+    "prompts": ["How much did I spend in September 2026?"],
+    "expected_amounts": ["0.00"],
+    "expected_keywords": []
+  },
+  {
+    "id": "ambiguous_request",
+    "prompts": ["Was I financially responsible last month?"],
+    "expected_amounts": [],
+    "expected_keywords": []
+  },
+  {
+    "id": "multi_tool_budget_and_savings",
+    "prompts": ["For July 2026, tell me whether dining was over budget and give my savings rate."],
+    "expected_amounts": ["560.00", "36.99"],
+    "expected_keywords": ["over", "savings"]
+  },
+  {
+    "id": "twelve_turn_context",
+    "prompts": [
+      "How much did I spend on groceries in June 2026?",
+      "How much did I spend on dining in June 2026?",
+      "Check my groceries budget for June 2026.",
+      "What was my June savings rate?",
+      "How much did I spend on groceries in July 2026?",
+      "How much did I spend on dining in July 2026?",
+      "Check my dining budget for July 2026.",
+      "Check my groceries budget for July 2026.",
+      "What was my July savings rate?",
+      "How much have I spent on dining in August 2026?",
+      "What is my August savings rate so far?",
+      "Return to July: was dining over budget and what was my savings rate?"
+    ],
+    "expected_amounts": ["560.00", "36.99"],
+    "expected_keywords": ["over", "savings"]
+  }
+]
+

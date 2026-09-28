@@ -1,0 +1,25 @@
+services:
+  mcp:
+    build: .
+    command: finance-mcp
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
+      GROQ_SUMMARY_MODEL: ${GROQ_SUMMARY_MODEL:-openai/gpt-oss-20b}
+      TYPESAFE_MODEL: ${TYPESAFE_MODEL:-jev-latest}
+      MCP_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  ui:
+    build: .
+    command: finance-ui
+    environment:
+      MCP_URL: http://mcp:8000/mcp
+      UI_HOST: 0.0.0.0
+    depends_on:
+      - mcp
+    ports:
+      - "127.0.0.1:8501:8501"
+
