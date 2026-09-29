@@ -1,0 +1,643 @@
+{
+  "nodes": [
+    {
+      "id": "readme_personal_finance_agent_beta",
+      "label": "Personal Finance Agent Beta",
+      "file_type": "document",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_validated_ledger",
+      "label": "Validated Ledger",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_transaction_lookup",
+      "label": "Transaction Lookup",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_deterministic_budget_checking",
+      "label": "Deterministic Budget Checking",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_savings_rate_calculation",
+      "label": "Savings-Rate Calculation",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_natural_language_budget_rules",
+      "label": "Natural-Language Budget Rules",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_validated_expression_schema",
+      "label": "Validated Expression Schema",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_exact_decimal_evaluation",
+      "label": "Exact Decimal Evaluation",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_insufficient_evidence",
+      "label": "Insufficient Evidence Result",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_manual_reason_act_observe_loop",
+      "label": "Six-Step Manual Reason-Act-Observe Loop",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_canonical_session_history",
+      "label": "Canonical In-Memory Session History",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_auto_context_mode",
+      "label": "Auto Context Mode",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_jev_context_mode",
+      "label": "Jev Context Mode",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_summary_context_mode",
+      "label": "Summary Context Mode",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_jev",
+      "label": "Jev",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_groq",
+      "label": "Groq",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_mcp_interface",
+      "label": "MCP Finance Session Interface",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_streamlit_ui",
+      "label": "Streamlit MCP Client UI",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_csv_uploads",
+      "label": "Per-Session CSV Uploads",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_live_context_inspector",
+      "label": "Live Context Inspector",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_golden_evaluation_suite",
+      "label": "Golden Evaluation Suite",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "docker_compose_mcp_service",
+      "label": "MCP Service",
+      "file_type": "code",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/docker-compose.yml",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "docker_compose_ui_service",
+      "label": "UI Service",
+      "file_type": "code",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/docker-compose.yml",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "docker_compose_groq_model_configuration",
+      "label": "Groq Model Configuration",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/docker-compose.yml",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "docker_compose_typesafe_jev_configuration",
+      "label": "TypeSafe Jev Configuration",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/docker-compose.yml",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "docker_compose_local_container_deployment",
+      "label": "Local Container Deployment",
+      "file_type": "concept",
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/docker-compose.yml",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "readme_personal_finance_agent_beta",
+      "target": "readme_validated_ledger",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_personal_finance_agent_beta",
+      "target": "readme_manual_reason_act_observe_loop",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_transaction_lookup",
+      "target": "readme_validated_ledger",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_deterministic_budget_checking",
+      "target": "readme_validated_ledger",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_savings_rate_calculation",
+      "target": "readme_validated_ledger",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_natural_language_budget_rules",
+      "target": "readme_validated_expression_schema",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_validated_expression_schema",
+      "target": "readme_exact_decimal_evaluation",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_exact_decimal_evaluation",
+      "target": "readme_validated_ledger",
+      "relation": "shares_data_with",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_natural_language_budget_rules",
+      "target": "readme_insufficient_evidence",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_canonical_session_history",
+      "target": "readme_auto_context_mode",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_canonical_session_history",
+      "target": "readme_jev_context_mode",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_canonical_session_history",
+      "target": "readme_summary_context_mode",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_jev_context_mode",
+      "target": "readme_jev",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_summary_context_mode",
+      "target": "readme_groq",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_auto_context_mode",
+      "target": "readme_jev_context_mode",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_auto_context_mode",
+      "target": "readme_summary_context_mode",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_streamlit_ui",
+      "target": "readme_mcp_interface",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_mcp_interface",
+      "target": "readme_canonical_session_history",
+      "relation": "shares_data_with",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_csv_uploads",
+      "target": "readme_validated_ledger",
+      "relation": "shares_data_with",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_csv_uploads",
+      "target": "readme_canonical_session_history",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_live_context_inspector",
+      "target": "readme_canonical_session_history",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_live_context_inspector",
+      "target": "readme_jev_context_mode",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_golden_evaluation_suite",
+      "target": "readme_personal_finance_agent_beta",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docker_compose_ui_service",
+      "target": "docker_compose_mcp_service",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/docker-compose.yml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docker_compose_mcp_service",
+      "target": "docker_compose_groq_model_configuration",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/docker-compose.yml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docker_compose_mcp_service",
+      "target": "docker_compose_typesafe_jev_configuration",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/docker-compose.yml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docker_compose_mcp_service",
+      "target": "docker_compose_local_container_deployment",
+      "relation": "implements",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/docker-compose.yml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docker_compose_ui_service",
+      "target": "docker_compose_local_container_deployment",
+      "relation": "implements",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/docker-compose.yml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docker_compose_mcp_service",
+      "target": "readme_mcp_interface",
+      "relation": "implements",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/docker-compose.yml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docker_compose_ui_service",
+      "target": "readme_streamlit_ui",
+      "relation": "implements",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/docker-compose.yml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docker_compose_groq_model_configuration",
+      "target": "readme_groq",
+      "relation": "references",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/docker-compose.yml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "docker_compose_typesafe_jev_configuration",
+      "target": "readme_jev",
+      "relation": "references",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/docker-compose.yml",
+      "source_location": null,
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "readme_pydantic_validated_finance_tools",
+      "label": "Pydantic-Validated Finance Tools",
+      "nodes": [
+        "readme_transaction_lookup",
+        "readme_deterministic_budget_checking",
+        "readme_savings_rate_calculation"
+      ],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md"
+    },
+    {
+      "id": "readme_runtime_context_compaction",
+      "label": "Runtime Context Compaction",
+      "nodes": [
+        "readme_canonical_session_history",
+        "readme_auto_context_mode",
+        "readme_jev_context_mode",
+        "readme_summary_context_mode"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/Users/aishik/Developer/unitar-agent-work/README.md"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}
