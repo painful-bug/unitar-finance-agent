@@ -10,10 +10,34 @@ import finance_agent.ui as ui
 from finance_agent.ui import DEFAULT_RULES_TEXT, _call_tool, _context_panel_html
 
 
+@pytest.fixture(autouse=True)
+def isolate_rule_preferences(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("FINANCE_UI_RULES_PATH", str(tmp_path / "rules.json"))
+
+
+def button(app, label):
+    return next(item for item in app.button if item.label == label)
+
+
 def test_rule_editor_starts_with_every_default_rule_comma_separated() -> None:
     assert DEFAULT_RULES_TEXT == ", ".join(
         rule.source_text for rule in default_budget_rules()
     )
+
+
+def test_rule_editor_survives_view_changes() -> None:
+    custom_rules = f"{DEFAULT_RULES_TEXT}\nSave at least 25% of income."
+    app = AppTest.from_string("from finance_agent.ui import render\nrender()").run(timeout=10)
+
+    app.radio[0].set_value("Settings").run(timeout=10)
+    app.text_area[0].set_value(custom_rules).run(timeout=10)
+    app.radio[0].set_value("Chat").run(timeout=10)
+    assert app.session_state["budget_rules_editor_version"] == ui.RULE_EDITOR_VERSION
+    assert app.session_state["budget_rules_text"] == custom_rules
+    app.radio[0].set_value("Settings").run(timeout=10)
+
+    assert not app.exception
+    assert app.text_area[0].value == custom_rules
 
 
 def test_stale_server_error_tells_user_to_restart_mcp() -> None:
@@ -37,6 +61,51 @@ def test_stale_server_error_tells_user_to_restart_mcp() -> None:
     with patch("finance_agent.ui.Client", OldServerClient):
         with pytest.raises(RuntimeError, match="Restart the MCP server"):
             asyncio.run(_call_tool("parse_budget_rules", {"rules_text": "Save 20%."}))
+
+
+def test_confirmed_rules_survive_a_fresh_streamlit_session() -> None:
+    custom_text = "Save at least 25% of income."
+    custom = BudgetRule(
+        rule_id="savings_target",
+        source_text=custom_text,
+        left=Operand(metric="savings", unit="RM"),
+        operator="gte",
+        right=Operand(metric="income", unit="RM", multiplier="0.25"),
+    ).model_dump(mode="json")
+    calls: list[tuple[str, dict]] = []
+
+    def fake_call_tool(name, arguments):
+        calls.append((name, arguments))
+        if name == "parse_budget_rules":
+            return {"rules": [custom], "warnings": []}
+        if name == "create_finance_session":
+            return {
+                "session_id": "test-session",
+                "as_of_date": "2026-08-15",
+                "context_mode": arguments["context_mode"],
+                "transaction_count": 1,
+                "budget_rules": arguments.get("budget_rules", []),
+            }
+        raise AssertionError(name)
+
+    with patch.object(ui, "call_tool", fake_call_tool):
+        first = AppTest.from_string("from finance_agent.ui import render\nrender()").run(timeout=10)
+        first.radio[0].set_value("Settings").run(timeout=10)
+        first.text_area[0].set_value(custom_text).run(timeout=10)
+
+        draft_refresh = AppTest.from_string("from finance_agent.ui import render\nrender()").run(timeout=10)
+        draft_refresh.radio[0].set_value("Settings").run(timeout=10)
+        assert draft_refresh.text_area[0].value == custom_text
+        button(draft_refresh, "Parse rules").click().run(timeout=10)
+        button(draft_refresh, "Confirm these rules").click().run(timeout=10)
+
+        confirmed_refresh = AppTest.from_string("from finance_agent.ui import render\nrender()").run(timeout=10)
+        confirmed_refresh.radio[0].set_value("Settings").run(timeout=10)
+        assert confirmed_refresh.text_area[0].value == custom_text
+        button(confirmed_refresh, "Start new session").click().run(timeout=10)
+
+    create = next(arguments for name, arguments in reversed(calls) if name == "create_finance_session")
+    assert create["budget_rules"] == [custom]
 
 
 def test_settings_can_add_or_remove_defaults_then_confirm_session_rules() -> None:
@@ -67,9 +136,6 @@ def test_settings_can_add_or_remove_defaults_then_confirm_session_rules() -> Non
         if name == "close_finance_session":
             return {"session_id": arguments["session_id"], "closed": True}
         raise AssertionError(name)
-
-    def button(app, label):
-        return next(item for item in app.button if item.label == label)
 
     with patch.object(ui, "call_tool", fake_call_tool):
         app = AppTest.from_string("from finance_agent.ui import render\nrender()").run(timeout=10)

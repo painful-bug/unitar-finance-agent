@@ -21,6 +21,15 @@ DEFAULT_RULES_TEXT = ", ".join(
     )
 )
 RULE_EDITOR_VERSION = 1
+RULE_FIELDS = {
+    "rule_id",
+    "source_text",
+    "supported",
+    "left",
+    "operator",
+    "right",
+    "unsupported_reason",
+}
 
 
 async def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -67,8 +76,54 @@ def _rules_signature(source: str, upload: Any, rules_text: str) -> str:
     return hashlib.sha256(csv_bytes + b"\0" + rules_text.encode("utf-8")).hexdigest()
 
 
-def _restore_default_rules() -> None:
-    st.session_state.budget_rules_text = DEFAULT_RULES_TEXT
+def _rule_preferences_path() -> Path:
+    # ponytail: local beta has one user; move this behind a per-user API when auth exists.
+    configured = os.getenv("FINANCE_UI_RULES_PATH")
+    return (
+        Path(configured).expanduser()
+        if configured
+        else Path.home() / ".finance-agent" / "rules.json"
+    )
+
+
+def _save_rule_preferences() -> None:
+    path = _rule_preferences_path()
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(
+            {
+                "rules_text": st.session_state.get("budget_rules_text", DEFAULT_RULES_TEXT),
+                "confirmed_rules": st.session_state.get("confirmed_rules"),
+                "confirmed_rules_signature": st.session_state.get("confirmed_rules_signature"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    temporary.chmod(0o600)
+    temporary.replace(path)
+
+
+def _load_rule_preferences() -> None:
+    try:
+        saved = json.loads(_rule_preferences_path().read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        saved = {}
+    rules_text = saved.get("rules_text")
+    confirmed = saved.get("confirmed_rules")
+    signature = saved.get("confirmed_rules_signature")
+    if not isinstance(rules_text, str):
+        rules_text = DEFAULT_RULES_TEXT
+    if not (
+        isinstance(confirmed, list)
+        and all(isinstance(rule, dict) and RULE_FIELDS <= rule.keys() for rule in confirmed)
+        and isinstance(signature, str)
+    ):
+        confirmed = None
+        signature = None
+    st.session_state.budget_rules_text = rules_text
     st.session_state.budget_rules_editor_version = RULE_EDITOR_VERSION
     for key in (
         "parsed_rules",
@@ -78,6 +133,32 @@ def _restore_default_rules() -> None:
         "confirmed_rules_signature",
     ):
         st.session_state.pop(key, None)
+    if confirmed is not None:
+        st.session_state.parsed_rules = confirmed
+        st.session_state.parsed_rules_signature = signature
+        st.session_state.rule_warnings = []
+        st.session_state.confirmed_rules = confirmed
+        st.session_state.confirmed_rules_signature = signature
+
+
+def _restore_default_rules() -> None:
+    st.session_state.budget_rules_text = DEFAULT_RULES_TEXT
+    st.session_state["_budget_rules_text"] = DEFAULT_RULES_TEXT
+    st.session_state.budget_rules_editor_version = RULE_EDITOR_VERSION
+    for key in (
+        "parsed_rules",
+        "rule_warnings",
+        "parsed_rules_signature",
+        "confirmed_rules",
+        "confirmed_rules_signature",
+    ):
+        st.session_state.pop(key, None)
+    _save_rule_preferences()
+
+
+def _persist_rule_editor() -> None:
+    st.session_state.budget_rules_text = st.session_state["_budget_rules_text"]
+    _save_rule_preferences()
 
 
 def _create_session(
@@ -241,7 +322,13 @@ def _render_settings(source: str, upload: Any) -> None:
         "Write one or more monthly rules in plain English. The model only compiles them; "
         "validated code evaluates the ledger."
     )
-    rules_text = st.text_area("Natural-language rules", key="budget_rules_text", height=180)
+    rules_text = st.text_area(
+        "Natural-language rules",
+        value=st.session_state.budget_rules_text,
+        key="_budget_rules_text",
+        on_change=_persist_rule_editor,
+        height=180,
+    )
     signature = _rules_signature(source, upload, rules_text)
     parsed_signature = st.session_state.get("parsed_rules_signature")
     confirmed_signature = st.session_state.get("confirmed_rules_signature")
@@ -258,6 +345,7 @@ def _render_settings(source: str, upload: Any) -> None:
             st.session_state.parsed_rules_signature = signature
             st.session_state.pop("confirmed_rules", None)
             st.session_state.pop("confirmed_rules_signature", None)
+            _save_rule_preferences()
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
@@ -268,8 +356,8 @@ def _render_settings(source: str, upload: Any) -> None:
         def comparison(rule: dict[str, Any]) -> str:
             if not rule["supported"]:
                 return rule["unsupported_reason"]
-            left = rule.get("left") or {}
-            right = rule.get("right") or {}
+            left = rule.get("left") if isinstance(rule.get("left"), dict) else {}
+            right = rule.get("right") if isinstance(rule.get("right"), dict) else {}
             return (
                 f"{left.get('metric') or left.get('value')} {rule['operator']} "
                 f"{right.get('metric') or right.get('value')}"
@@ -295,6 +383,7 @@ def _render_settings(source: str, upload: Any) -> None:
         if st.button("Confirm these rules", use_container_width=True):
             st.session_state.confirmed_rules = parsed
             st.session_state.confirmed_rules_signature = signature
+            _save_rule_preferences()
             st.rerun()
     elif parsed:
         st.warning("The rule text or ledger changed. Parse again before confirming.")
@@ -313,8 +402,11 @@ def render() -> None:
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if st.session_state.get("budget_rules_editor_version") != RULE_EDITOR_VERSION:
-        _restore_default_rules()
+    if (
+        "budget_rules_text" not in st.session_state
+        or st.session_state.get("budget_rules_editor_version") != RULE_EDITOR_VERSION
+    ):
+        _load_rule_preferences()
 
     with st.sidebar:
         view = st.radio("View", ("Chat", "Settings"), horizontal=True)
