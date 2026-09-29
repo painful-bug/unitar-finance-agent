@@ -51,10 +51,18 @@ def test_mcp_session_lifecycle_and_structured_results() -> None:
 
             answered = await client.call_tool(
                 "ask_finance_agent",
-                {"session_id": session_id, "question": "July groceries?", "context_mode": "summary"},
+                {
+                    "session_id": session_id,
+                    "question": "July groceries?",
+                    "context_mode": "summary",
+                    "include_context": True,
+                },
             )
             assert answered.structured_content["status"] == "ok"
             assert answered.structured_content["trace"][0]["tool"] == "lookup_transactions"
+            context = answered.structured_content["context"]
+            assert context["before_messages"][0]["role"] == "system"
+            assert context["after_messages"] == context["before_messages"]
 
             closed = await client.call_tool("close_finance_session", {"session_id": session_id})
             assert closed.structured_content == {"session_id": session_id, "closed": True}

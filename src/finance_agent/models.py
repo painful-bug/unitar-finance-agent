@@ -16,6 +16,8 @@ class ContextReport(BaseModel):
     after_tokens: int = 0
     fallback_reason: str | None = None
     decisions: list[dict[str, Any]] = Field(default_factory=list)
+    before_messages: list[dict[str, Any]] = Field(default_factory=list)
+    after_messages: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class TraceEvent(BaseModel):

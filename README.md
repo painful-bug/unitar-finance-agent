@@ -53,7 +53,7 @@ date,kind,category,amount,merchant
 
 ## Context modes
 
-- `jev`: preserve human/assistant text, then keep, excerpt, or drop old complete tool-call/result pairs using two typed Jev decisions.
+- `jev`: preserve human/assistant text, then keep, excerpt, or drop old complete tool-call/result pairs using two typed Jev decisions; use summary if Jev cannot reduce the context by at least 5%.
 - `summary`: replace only an eligible old prefix with a clearly labeled Groq-generated summary while preserving the six newest messages exactly.
 - `auto`: try Jev first and use summary when Jev fails or removes less than 5%.
 
@@ -65,20 +65,9 @@ Open **Settings** in the Streamlit test UI, enter one monthly rule per line, and
 
 For example, `Save at least 20% of monthly income` is stored as a comparison between savings and income multiplied by `0.20`. The actual income and target are resolved separately for every requested month.
 
-## Context-compaction presentation
+## Live context inspector
 
-The standalone inspector is a presentation harness, not an application feature. Run it separately from the main UI:
-
-```bash
-uv run --env-file .env streamlit run demos/context_compaction_demo.py --server.port 8502
-```
-
-1. Keep **Live Jev** selected and load the 12-turn scenario.
-2. Point out that the generated canonical context exceeds the 8,000-token trigger.
-3. Select **Compact model context**.
-4. Compare the before/after token counts, keep/trim/drop table, and side-by-side JSON.
-5. Show the green confirmation that canonical history stayed unchanged.
-6. If live credentials or networking fail, select the clearly labeled **Deterministic fallback** and repeat.
+In **Settings**, enable **Show context live**. A color-coded context window appears below **Start new session** in the sidebar after the next answer. Switch between the canonical pre-compaction context and the exact model-facing context; double-click the window to enter or leave fullscreen. Tool calls are labeled with their keep, trim, or drop decision.
 
 ## Tests and evaluation
 

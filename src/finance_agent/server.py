@@ -91,6 +91,7 @@ class SessionStore:
         session_id: str,
         question: str,
         context_mode: ContextMode | None = None,
+        include_context: bool = False,
     ) -> AgentResult:
         session = self.sessions.get(session_id)
         if not session:
@@ -117,6 +118,7 @@ class SessionStore:
                 question,
                 provider,
                 self.context_manager,
+                include_context=include_context,
             )
 
     def close(self, session_id: str) -> CloseResult:
@@ -156,9 +158,10 @@ def build_server(store: SessionStore | None = None) -> MCPServer:
         session_id: str,
         question: str,
         context_mode: ContextMode | None = None,
+        include_context: bool = False,
     ) -> AgentResult:
         """Ask the hand-written finance agent a question in an existing session."""
-        return await sessions.ask(session_id, question, context_mode)
+        return await sessions.ask(session_id, question, context_mode, include_context)
 
     @server.tool(structured_output=True)
     def close_finance_session(session_id: str) -> CloseResult:

@@ -88,7 +88,13 @@ def _apply_decisions(
     for call_id in pairs:
         call_score = scores[f"call_{call_id}"]
         result_score = scores[f"result_{call_id}"]
-        action = "keep" if result_score >= threshold else ("trim" if call_score >= threshold else "drop")
+        action = (
+            "keep"
+            if call_score >= threshold and result_score >= threshold
+            else "trim"
+            if call_score >= threshold or result_score >= threshold
+            else "drop"
+        )
         actions[call_id] = action
         decision_log.append(
             {
@@ -155,43 +161,61 @@ class ContextManager:
         session: Session,
         provider: ChatProvider,
         mode: str | None = None,
+        include_messages: bool = False,
     ) -> tuple[list[dict[str, Any]], ContextReport]:
         full = [system, *session.messages]
         before = estimate_tokens(full)
         if before < self.trigger_tokens:
-            return full, ContextReport(before_tokens=before, after_tokens=before)
+            return full, ContextReport(
+                before_tokens=before,
+                after_tokens=before,
+                before_messages=copy.deepcopy(full) if include_messages else [],
+                after_messages=copy.deepcopy(full) if include_messages else [],
+            )
 
         selected = mode or session.context_mode
         if selected == "summary":
             try:
-                return self._summarize(system, session, provider, before)
+                return self._summarize(
+                    system, session, provider, before, include_messages=include_messages
+                )
             except Exception as exc:
                 raise ContextManagementError(f"Groq summary failed: {exc}") from exc
-        if selected == "jev":
-            try:
-                return self._compact_with_jev(system, session, before)
-            except Exception as exc:
-                raise ContextManagementError(f"Jev compaction failed: {exc}") from exc
-        if selected != "auto":
+        if selected not in {"auto", "jev"}:
             raise ValueError(f"unknown context mode: {selected}")
 
         try:
-            compacted, report = self._compact_with_jev(system, session, before)
+            compacted, report = self._compact_with_jev(
+                system, session, before, include_messages
+            )
             reduction = 1 - report.after_tokens / max(1, report.before_tokens)
             if reduction >= self.min_reduction:
                 return compacted, report
             reason = f"Jev removed less than {self.min_reduction:.0%}"
         except Exception as exc:
+            if selected == "jev":
+                raise ContextManagementError(f"Jev compaction failed: {exc}") from exc
             reason = str(exc)
         try:
-            return self._summarize(system, session, provider, before, fallback_reason=reason)
+            return self._summarize(
+                system,
+                session,
+                provider,
+                before,
+                fallback_reason=reason,
+                include_messages=include_messages,
+            )
         except Exception as exc:
             raise ContextManagementError(
                 f"Jev failed ({reason}); Groq summary failed ({exc})"
             ) from exc
 
     def _compact_with_jev(
-        self, system: dict[str, Any], session: Session, before: int
+        self,
+        system: dict[str, Any],
+        session: Session,
+        before: int,
+        include_messages: bool,
     ) -> tuple[list[dict[str, Any]], ContextReport]:
         pairs = _tool_pairs(session.messages, self.preserve_recent)
         if not pairs:
@@ -207,6 +231,8 @@ class ContextManager:
             before_tokens=before,
             after_tokens=estimate_tokens(compacted),
             decisions=decisions,
+            before_messages=copy.deepcopy([system, *session.messages]) if include_messages else [],
+            after_messages=copy.deepcopy(compacted) if include_messages else [],
         )
 
     def _summarize(
@@ -216,6 +242,7 @@ class ContextManager:
         provider: ChatProvider,
         before: int,
         fallback_reason: str | None = None,
+        include_messages: bool = False,
     ) -> tuple[list[dict[str, Any]], ContextReport]:
         desired = max(0, len(session.messages) - self.preserve_recent)
         cut = _safe_prefix_cut(session.messages, desired)
@@ -248,4 +275,6 @@ class ContextManager:
             before_tokens=before,
             after_tokens=estimate_tokens(compacted),
             fallback_reason=fallback_reason,
+            before_messages=copy.deepcopy([system, *session.messages]) if include_messages else [],
+            after_messages=copy.deepcopy(compacted) if include_messages else [],
         )

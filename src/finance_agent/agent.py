@@ -162,6 +162,7 @@ def run_agent(
     provider: ChatProvider,
     context_manager: Any | None = None,
     max_steps: int = 6,
+    include_context: bool = False,
 ) -> AgentResult:
     session.messages.append({"role": "user", "content": user_question})
     trace: list[TraceEvent] = []
@@ -171,7 +172,12 @@ def run_agent(
         system = {"role": "system", "content": _system_prompt(session)}
         try:
             if context_manager:
-                messages, context_report = context_manager.prepare(system, session, provider)
+                messages, context_report = context_manager.prepare(
+                    system,
+                    session,
+                    provider,
+                    include_messages=include_context,
+                )
             else:
                 messages = [system, *session.messages]
         except ContextManagementError as exc:

@@ -61,10 +61,10 @@ def make_session() -> Session:
 
 def test_jev_keeps_trims_and_drops_complete_tool_pairs() -> None:
     answers = {
-        "call_keep": 0.2,
+        "call_keep": 0.9,
         "result_keep": 0.9,
-        "call_trim": 0.8,
-        "result_trim": 0.2,
+        "call_trim": 0.2,
+        "result_trim": 0.9,
         "call_drop": 0.1,
         "result_drop": 0.1,
     }
@@ -92,6 +92,38 @@ def test_jev_keeps_trims_and_drops_complete_tool_pairs() -> None:
     assert report.strategy == "jev"
     assert {item["action"] for item in report.decisions} == {"keep", "trim", "drop"}
     assert session.messages == original
+
+
+def test_jev_falls_back_when_all_keep_would_not_compact() -> None:
+    session = make_session()
+    manager = ContextManager(
+        FakeJev(
+            {
+                "call_keep": 1.0,
+                "result_keep": 1.0,
+                "call_trim": 1.0,
+                "result_trim": 1.0,
+                "call_drop": 1.0,
+                "result_drop": 1.0,
+            }
+        ),
+        trigger_tokens=1,
+        preserve_recent=1,
+    )
+
+    compacted, report = manager.prepare(
+        {"role": "system", "content": "system"},
+        session,
+        SummaryProvider(),
+        mode="jev",
+        include_messages=True,
+    )
+
+    assert report.strategy == "summary"
+    assert report.after_tokens < report.before_tokens
+    assert report.fallback_reason == "Jev removed less than 5%"
+    assert report.before_messages[1:] == session.messages
+    assert report.after_messages == compacted
 
 
 def test_auto_falls_back_to_groq_summary_without_splitting_recent_history() -> None:
