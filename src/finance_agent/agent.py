@@ -70,6 +70,26 @@ TOOLS = [
 ]
 
 
+def _groq_schema(model: type[BaseModel]) -> dict[str, Any]:
+    schema = model.model_json_schema()
+
+    def clean(value: Any) -> None:
+        if isinstance(value, dict):
+            pattern = value.get("pattern")
+            if isinstance(pattern, str) and "(?" in pattern:
+                value.pop("pattern")
+            if value.get("type") == "object" and "properties" in value:
+                value["required"] = list(value["properties"])
+            for child in value.values():
+                clean(child)
+        elif isinstance(value, list):
+            for child in value:
+                clean(child)
+
+    clean(schema)
+    return schema
+
+
 class GroqProvider:
     def __init__(self, model: str | None = None, client: Groq | None = None):
         self.model = model or os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
@@ -90,7 +110,7 @@ class GroqProvider:
                 "json_schema": {
                     "name": response_model.__name__,
                     "strict": True,
-                    "schema": response_model.model_json_schema(),
+                    "schema": _groq_schema(response_model),
                 },
             }
         message = self.client.chat.completions.create(**kwargs).choices[0].message

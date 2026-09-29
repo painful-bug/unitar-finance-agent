@@ -13,9 +13,13 @@ import streamlit as st
 from mcp import Client
 
 
-DEFAULT_RULES_TEXT = """Keep monthly dining expenses at or below RM500.
-Keep monthly groceries expenses at or below RM800.
-Save at least 20% of monthly income."""
+DEFAULT_RULES_TEXT = ", ".join(
+    (
+        "Keep monthly dining expenses at or below RM500.",
+        "Keep monthly groceries expenses at or below RM800.",
+        "Save at least 20% of monthly income.",
+    )
+)
 
 
 async def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -23,6 +27,11 @@ async def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         result = await client.call_tool(name, arguments)
     if result.is_error or result.structured_content is None:
         detail = " ".join(getattr(item, "text", "") for item in result.content)
+        if detail.startswith("Unknown tool:"):
+            raise RuntimeError(
+                f"{detail}. The MCP server is running older code. Restart the MCP server "
+                "with `uv run --env-file .env finance-mcp`, then try again."
+            )
         raise RuntimeError(detail or f"MCP tool {name} failed")
     return result.structured_content
 

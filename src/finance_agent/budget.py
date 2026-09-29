@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from decimal import Decimal
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 MetricName = Literal[
@@ -37,6 +37,8 @@ METRIC_UNITS: dict[str, Unit] = {
 
 
 class Operand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     metric: MetricName | None = None
     value: Decimal | None = None
     unit: Unit
@@ -62,6 +64,8 @@ class Operand(BaseModel):
 
 
 class BudgetRule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     rule_id: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
     source_text: str = Field(min_length=1, max_length=500)
     supported: bool = True
@@ -85,6 +89,8 @@ class BudgetRule(BaseModel):
 
 
 class BudgetRuleSet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     rules: list[BudgetRule] = Field(min_length=1, max_length=50)
 
 
@@ -187,6 +193,7 @@ def parse_budget_rules(
         "known_categories": sorted(set(categories)),
         "instructions": [
             "Compile each rule into one or more atomic monthly comparisons.",
+            "Treat commas, semicolons, and line breaks between complete rules as separators.",
             "Use only the metrics and fields allowed by the supplied JSON schema.",
             "For percentages, use percentage points: 20% is the decimal value 20.",
             "Use multiplier 0.20 for a monetary target equal to 20% of another RM metric.",

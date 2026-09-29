@@ -1,11 +1,14 @@
 import asyncio
 import json
+from decimal import Decimal
 
 from mcp import Client
 
 from finance_agent.agent import AssistantTurn, ToolCall
+from finance_agent.budget import BudgetRule, Operand, default_budget_rules
 from finance_agent.context import ContextManager
 from finance_agent.server import SessionStore, build_server
+from finance_agent.ui import DEFAULT_RULES_TEXT
 
 
 class FakeProvider:
@@ -73,38 +76,42 @@ def test_mcp_session_lifecycle_and_structured_results() -> None:
 def test_mcp_rule_preview_can_be_confirmed_into_a_session() -> None:
     class RuleParser:
         def chat(self, messages, tools=None, response_model=None):
+            rules_text = json.loads(messages[-1]["content"])["rules"]
+            custom = BudgetRule(
+                rule_id="savings_target",
+                source_text="Save at least 25% of income.",
+                left=Operand(metric="savings", unit="RM"),
+                operator="gte",
+                right=Operand(metric="income", unit="RM", multiplier=Decimal("0.25")),
+            )
+            rules = default_budget_rules() + [custom] if rules_text.startswith(DEFAULT_RULES_TEXT) else [custom]
             return AssistantTurn(
-                content=json.dumps(
-                    {
-                        "rules": [
-                            {
-                                "rule_id": "savings_target",
-                                "source_text": "Save at least 20% of income.",
-                                "supported": True,
-                                "left": {"metric": "savings", "unit": "RM"},
-                                "operator": "gte",
-                                "right": {
-                                    "metric": "income",
-                                    "unit": "RM",
-                                    "multiplier": "0.20",
-                                },
-                            }
-                        ]
-                    }
-                )
+                content=json.dumps({"rules": [rule.model_dump(mode="json") for rule in rules]})
             )
 
     async def scenario() -> None:
         server = build_server(SessionStore(provider=RuleParser()))
         async with Client(server) as client:
             preview = await client.call_tool(
-                "parse_budget_rules", {"rules_text": "Save at least 20% of income."}
+                "parse_budget_rules",
+                {"rules_text": f"{DEFAULT_RULES_TEXT}\nSave at least 25% of income."},
             )
             rules = preview.structured_content["rules"]
-            created = await client.call_tool(
-                "create_finance_session", {"budget_rules": rules}
+            with_defaults = await client.call_tool(
+                "create_finance_session", {"budget_rules": rules},
+            )
+            assert len(with_defaults.structured_content["budget_rules"]) == 4
+
+            custom_preview = await client.call_tool(
+                "parse_budget_rules", {"rules_text": "Save at least 25% of income."}
+            )
+            custom_only = await client.call_tool(
+                "create_finance_session",
+                {"budget_rules": custom_preview.structured_content["rules"]},
             )
 
-            assert created.structured_content["budget_rules"][0]["rule_id"] == "savings_target"
+            assert [
+                rule["rule_id"] for rule in custom_only.structured_content["budget_rules"]
+            ] == ["savings_target"]
 
     asyncio.run(scenario())

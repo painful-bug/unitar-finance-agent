@@ -61,7 +61,7 @@ The canonical history is never overwritten, so a running session can switch mode
 
 ## Natural-language budget rules
 
-Open **Settings** in the Streamlit test UI, enter one monthly rule per line, and select **Parse rules**. Groq converts the text into a validated expression preview; confirm that preview before starting a session. The saved expression is evaluated with exact `Decimal` arithmetic over the ledger. Unsupported rules remain visible and return `insufficient_evidence` instead of a guessed result.
+Open **Settings** in the Streamlit test UI, edit the comma-separated built-in rules or add rules on new lines, and select **Parse rules**. Groq converts the text into a validated expression preview; confirm that preview before starting a session. The saved expression is evaluated with exact `Decimal` arithmetic over the ledger. Unsupported rules remain visible and return `insufficient_evidence` instead of a guessed result.
 
 For example, `Save at least 20% of monthly income` is stored as a comparison between savings and income multiplied by `0.20`. The actual income and target are resolved separately for every requested month.
 

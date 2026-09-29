@@ -1,9 +1,10 @@
 import json
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 
-from finance_agent.agent import AssistantTurn
-from finance_agent.budget import BudgetRule, Operand, parse_budget_rules
+from finance_agent.agent import AssistantTurn, GroqProvider
+from finance_agent.budget import BudgetRule, BudgetRuleSet, Operand, parse_budget_rules
 from finance_agent.finance import FinanceData, load_csv
 
 
@@ -43,6 +44,49 @@ def test_llm_parser_returns_validated_reusable_expression() -> None:
     assert preview.warnings == []
     assert preview.rules[0].right.metric == "income"
     assert preview.rules[0].right.multiplier == Decimal("0.20")
+
+
+def test_groq_schema_omits_unsupported_decimal_lookaround_regex() -> None:
+    class Completions:
+        kwargs = None
+
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            content = FakeParser().chat([], response_model=BudgetRuleSet).content
+            message = SimpleNamespace(content=content, tool_calls=[])
+            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    completions = Completions()
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    GroqProvider(client=client).chat(
+        [{"role": "user", "content": "compile"}],
+        response_model=BudgetRuleSet,
+    )
+
+    def patterns(value):
+        if isinstance(value, dict):
+            return [
+                item
+                for key, child in value.items()
+                for item in ([child] if key == "pattern" else patterns(child))
+            ]
+        if isinstance(value, list):
+            return [item for child in value for item in patterns(child)]
+        return []
+
+    schema = completions.kwargs["response_format"]["json_schema"]["schema"]
+    assert all("(?" not in pattern for pattern in patterns(schema))
+
+    def objects(value):
+        if isinstance(value, dict):
+            found = [value] if value.get("type") == "object" else []
+            return found + [item for child in value.values() for item in objects(child)]
+        if isinstance(value, list):
+            return [item for child in value for item in objects(child)]
+        return []
+
+    assert all(item.get("additionalProperties") is False for item in objects(schema))
+    assert all(set(item.get("required", [])) == set(item.get("properties", {})) for item in objects(schema))
 
 
 def test_savings_target_resolves_against_actual_monthly_income() -> None:
