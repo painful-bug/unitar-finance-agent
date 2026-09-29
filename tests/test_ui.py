@@ -132,3 +132,61 @@ def test_context_panel_is_color_coded_safe_and_fullscreen_capable() -> None:
     assert "trim" in panel
     assert "requestFullscreen" in panel
     assert "Before · canonical" in panel and "After · model input" in panel
+
+
+def test_live_context_setting_survives_chat_answer_reruns() -> None:
+    context = {
+        "strategy": "summary",
+        "before_tokens": 100,
+        "after_tokens": 60,
+        "decisions": [],
+        "before_messages": [{"role": "user", "content": "How much did I spend?"}],
+        "after_messages": [{"role": "user", "content": "How much did I spend?"}],
+    }
+    calls: list[tuple[str, dict]] = []
+    rendered_contexts: list[dict | None] = []
+
+    def fake_call_tool(name, arguments):
+        calls.append((name, arguments))
+        if name == "create_finance_session":
+            return {
+                "session_id": "test-session",
+                "as_of_date": "2026-08-15",
+                "context_mode": arguments["context_mode"],
+                "transaction_count": 1,
+                "budget_rules": [],
+            }
+        if name == "ask_finance_agent":
+            return {
+                "answer": "RM42",
+                "status": "complete",
+                "steps": 1,
+                "trace": [],
+                "context": context,
+            }
+        raise AssertionError(name)
+
+    with (
+        patch.object(ui, "call_tool", fake_call_tool),
+        patch.object(
+            ui,
+            "_render_context_panel",
+            lambda: rendered_contexts.append(ui.st.session_state.get("live_context")),
+        ),
+    ):
+        app = AppTest.from_string("from finance_agent.ui import render\nrender()")
+        app.run(timeout=10)
+        app.radio[0].set_value("Settings").run(timeout=10)
+        app.toggle[0].set_value(True).run(timeout=10)
+        app.radio[0].set_value("Chat").run(timeout=10)
+        assert app.session_state["show_context_live"] is True
+        app.chat_input[0].set_value("How much did I spend?").run(timeout=10)
+
+        ask = next(arguments for name, arguments in calls if name == "ask_finance_agent")
+        assert ask["include_context"] is True
+        assert app.session_state["show_context_live"] is True
+        assert app.session_state["live_context"] == context
+        assert rendered_contexts[-1] == context
+
+        app.radio[0].set_value("Settings").run(timeout=10)
+        assert app.toggle[0].value is True

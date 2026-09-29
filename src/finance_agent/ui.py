@@ -231,9 +231,10 @@ def _render_context_panel() -> None:
 
 def _render_settings(source: str, upload: Any) -> None:
     st.header("Budget rule settings")
-    st.toggle(
+    st.session_state.show_context_live = st.toggle(
         "Show context live",
-        key="show_context_live",
+        value=st.session_state.get("show_context_live", False),
+        key="_show_context_live",
         help="Shows the canonical session and the context sent to the model after each answer.",
     )
     st.caption(
