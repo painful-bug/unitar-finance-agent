@@ -11,6 +11,7 @@ from mcp.server.mcpserver import MCPServer
 from pydantic import BaseModel
 
 from .agent import ChatProvider, GroqProvider, run_agent
+from .budget import BudgetRule, BudgetRulePreview, parse_budget_rules as compile_budget_rules
 from .context import ContextManager
 from .finance import FinanceData, load_csv
 from .models import AgentResult, ContextReport, Session
@@ -23,6 +24,7 @@ class SessionInfo(BaseModel):
     as_of_date: date
     context_mode: ContextMode
     transaction_count: int
+    budget_rules: list[BudgetRule]
 
 
 class CloseResult(BaseModel):
@@ -50,6 +52,7 @@ class SessionStore:
         csv_text: str | None = None,
         as_of_date: date | None = None,
         context_mode: ContextMode = "auto",
+        budget_rules: list[BudgetRule] | None = None,
     ) -> SessionInfo:
         using_demo = csv_text is None
         transactions = load_csv(_demo_csv() if using_demo else csv_text)
@@ -57,7 +60,7 @@ class SessionStore:
         session_id = str(uuid4())
         self.sessions[session_id] = Session(
             session_id=session_id,
-            data=FinanceData(transactions, anchor),
+            data=FinanceData(transactions, anchor, budget_rules=budget_rules),
             as_of_date=anchor,
             context_mode=context_mode,
         )
@@ -67,6 +70,20 @@ class SessionStore:
             as_of_date=anchor,
             context_mode=context_mode,
             transaction_count=len(transactions),
+            budget_rules=self.sessions[session_id].data.budget_rules,
+        )
+
+    def parse_budget_rules(
+        self,
+        rules_text: str,
+        csv_text: str | None = None,
+    ) -> BudgetRulePreview:
+        transactions = load_csv(_demo_csv() if csv_text is None else csv_text)
+        provider = self.provider or GroqProvider()
+        return compile_budget_rules(
+            rules_text,
+            (transaction.category for transaction in transactions),
+            provider,
         )
 
     async def ask(
@@ -117,13 +134,22 @@ def build_server(store: SessionStore | None = None) -> MCPServer:
     )
 
     @server.tool(structured_output=True)
+    def parse_budget_rules(
+        rules_text: str,
+        csv_text: str | None = None,
+    ) -> BudgetRulePreview:
+        """Compile natural-language monthly budget rules into a validated expression schema."""
+        return sessions.parse_budget_rules(rules_text, csv_text)
+
+    @server.tool(structured_output=True)
     def create_finance_session(
         csv_text: str | None = None,
         as_of_date: date | None = None,
         context_mode: ContextMode = "auto",
+        budget_rules: list[BudgetRule] | None = None,
     ) -> SessionInfo:
         """Create an in-memory finance session from bundled data or validated ledger CSV."""
-        return sessions.create(csv_text, as_of_date, context_mode)
+        return sessions.create(csv_text, as_of_date, context_mode, budget_rules)
 
     @server.tool(structured_output=True)
     async def ask_finance_agent(

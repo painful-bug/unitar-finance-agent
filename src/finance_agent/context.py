@@ -6,9 +6,10 @@ import math
 import os
 from typing import Any, Protocol
 
-from typesafe_sdk import Noul, TypeSafeClient
+from typesafe_sdk import Noul
 
 from .agent import ChatProvider, GroqProvider
+from .jev import JevClient
 from .models import ContextManagementError, ContextReport, Session
 
 
@@ -24,27 +25,9 @@ def _excerpt(text: str, size: int = 300) -> str:
 
 
 class JevJudge(Protocol):
-    def ask(self, state: dict[str, Any], questions: dict[str, Noul]) -> dict[str, float]: ...
-
-
-class TypeSafeJev:
-    def __init__(self, client: TypeSafeClient | None = None):
-        self.client = client
-
-    def ask(self, state: dict[str, Any], questions: dict[str, Noul]) -> dict[str, float]:
-        if self.client:
-            response = self.client.system_one(state=state, questions=questions)
-        else:
-            with TypeSafeClient(
-                api_key=os.getenv("TYPESAFE_API_KEY"),
-                model=os.getenv("TYPESAFE_MODEL", "jev-latest"),
-                timeout=10,
-            ) as client:
-                response = client.system_one(state=state, questions=questions)
-        missing = set(questions) - set(response.nouls)
-        if missing:
-            raise ValueError(f"Jev omitted decisions: {sorted(missing)}")
-        return {name: answer.noul for name, answer in response.nouls.items() if name in questions}
+    def noul_scores(
+        self, state: dict[str, Any], questions: dict[str, Noul]
+    ) -> dict[str, float]: ...
 
 
 def _tool_pairs(messages: list[dict[str, Any]], preserve_recent: int) -> dict[str, tuple[int, int]]:
@@ -160,7 +143,7 @@ class ContextManager:
         keep_threshold: float = 0.5,
         min_reduction: float = 0.05,
     ):
-        self.jev = jev or TypeSafeJev()
+        self.jev = jev or JevClient()
         self.trigger_tokens = trigger_tokens
         self.preserve_recent = preserve_recent
         self.keep_threshold = keep_threshold
@@ -214,7 +197,7 @@ class ContextManager:
         if not pairs:
             raise ValueError("no old complete tool calls are eligible for Jev")
         questions = _questions(list(pairs))
-        scores = self.jev.ask(_jev_state(session), questions)
+        scores = self.jev.noul_scores(_jev_state(session), questions)
         compacted_history, decisions = _apply_decisions(
             session.messages, pairs, scores, self.keep_threshold
         )

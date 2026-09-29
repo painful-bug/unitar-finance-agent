@@ -4,7 +4,8 @@ A framework-free personal finance assistant that answers from a validated ledger
 
 ## What is included
 
-- Three Pydantic-validated finance tools: transaction lookup, budget checking, and savings-rate calculation.
+- Three Pydantic-validated finance tools: transaction lookup, deterministic budget checking, and savings-rate calculation.
+- Session-scoped natural-language budget rules compiled into a safe expression schema.
 - A six-step manual reason → act → observe loop with recoverable malformed tool calls.
 - Canonical in-memory session history with runtime-selectable `auto`, `jev`, and `summary` context modes.
 - MCP tools for creating, asking, and closing finance sessions.
@@ -57,6 +58,27 @@ date,kind,category,amount,merchant
 - `auto`: try Jev first and use summary when Jev fails or removes less than 5%.
 
 The canonical history is never overwritten, so a running session can switch modes. If both strategies fail, the request returns an error rather than sending uncontrolled context.
+
+## Natural-language budget rules
+
+Open **Settings** in the Streamlit test UI, enter one monthly rule per line, and select **Parse rules**. Groq converts the text into a validated expression preview; confirm that preview before starting a session. The saved expression is evaluated with exact `Decimal` arithmetic over the ledger. Unsupported rules remain visible and return `insufficient_evidence` instead of a guessed result.
+
+For example, `Save at least 20% of monthly income` is stored as a comparison between savings and income multiplied by `0.20`. The actual income and target are resolved separately for every requested month.
+
+## Context-compaction presentation
+
+The standalone inspector is a presentation harness, not an application feature. Run it separately from the main UI:
+
+```bash
+uv run --env-file .env streamlit run demos/context_compaction_demo.py --server.port 8502
+```
+
+1. Keep **Live Jev** selected and load the 12-turn scenario.
+2. Point out that the generated canonical context exceeds the 8,000-token trigger.
+3. Select **Compact model context**.
+4. Compare the before/after token counts, keep/trim/drop table, and side-by-side JSON.
+5. Show the green confirmation that canonical history stayed unchanged.
+6. If live credentials or networking fail, select the clearly labeled **Deterministic fallback** and repeat.
 
 ## Tests and evaluation
 

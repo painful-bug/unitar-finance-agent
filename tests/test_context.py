@@ -12,7 +12,7 @@ class FakeJev:
         self.answers = answers or {}
         self.error = error
 
-    def ask(self, state, questions):
+    def noul_scores(self, state, questions):
         if self.error:
             raise self.error
         return {name: self.answers[name] for name in questions}

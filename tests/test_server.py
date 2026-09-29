@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 from mcp import Client
 
@@ -38,6 +39,7 @@ def test_mcp_session_lifecycle_and_structured_results() -> None:
         async with Client(server) as client:
             tools = await client.list_tools()
             assert {tool.name for tool in tools.tools} == {
+                "parse_budget_rules",
                 "create_finance_session",
                 "ask_finance_agent",
                 "close_finance_session",
@@ -56,5 +58,45 @@ def test_mcp_session_lifecycle_and_structured_results() -> None:
 
             closed = await client.call_tool("close_finance_session", {"session_id": session_id})
             assert closed.structured_content == {"session_id": session_id, "closed": True}
+
+    asyncio.run(scenario())
+
+
+def test_mcp_rule_preview_can_be_confirmed_into_a_session() -> None:
+    class RuleParser:
+        def chat(self, messages, tools=None, response_model=None):
+            return AssistantTurn(
+                content=json.dumps(
+                    {
+                        "rules": [
+                            {
+                                "rule_id": "savings_target",
+                                "source_text": "Save at least 20% of income.",
+                                "supported": True,
+                                "left": {"metric": "savings", "unit": "RM"},
+                                "operator": "gte",
+                                "right": {
+                                    "metric": "income",
+                                    "unit": "RM",
+                                    "multiplier": "0.20",
+                                },
+                            }
+                        ]
+                    }
+                )
+            )
+
+    async def scenario() -> None:
+        server = build_server(SessionStore(provider=RuleParser()))
+        async with Client(server) as client:
+            preview = await client.call_tool(
+                "parse_budget_rules", {"rules_text": "Save at least 20% of income."}
+            )
+            rules = preview.structured_content["rules"]
+            created = await client.call_tool(
+                "create_finance_session", {"budget_rules": rules}
+            )
+
+            assert created.structured_content["budget_rules"][0]["rule_id"] == "savings_target"
 
     asyncio.run(scenario())

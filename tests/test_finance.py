@@ -39,3 +39,4 @@ def test_zero_income_has_no_savings_rate() -> None:
     )
 
     assert data.calculate_savings_rate("2026-07").rate is None
+    assert data.check_budget_rule("minimum_savings_rate", "2026-07").status == "unavailable"

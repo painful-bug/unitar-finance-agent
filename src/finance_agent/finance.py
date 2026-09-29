@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from .budget import BudgetResult, BudgetRule, Operand, default_budget_rules
+
 MAX_CSV_BYTES = 1_000_000
 MAX_CSV_ROWS = 5_000
 MONEY = Decimal("0.01")
@@ -30,15 +32,6 @@ class LookupResult(BaseModel):
     transactions: list[Transaction]
     total: Decimal
     count: int
-
-
-class BudgetResult(BaseModel):
-    rule_id: str
-    month: str
-    status: Literal["within", "over", "met", "below", "unavailable"]
-    observed: Decimal | None
-    limit: Decimal
-    unit: Literal["RM", "percent"]
 
 
 class SavingsResult(BaseModel):
@@ -99,9 +92,36 @@ def load_csv(csv_text: str) -> list[Transaction]:
 
 
 class FinanceData:
-    def __init__(self, transactions: list[Transaction], as_of_date: date):
+    def __init__(
+        self,
+        transactions: list[Transaction],
+        as_of_date: date,
+        budget_rules: list[BudgetRule] | None = None,
+    ):
         self.transactions = transactions
         self.as_of_date = as_of_date
+        self.budget_rules = list(budget_rules) if budget_rules is not None else default_budget_rules()
+
+    def _matches(
+        self,
+        month: str,
+        category: str | None = None,
+        kind: Literal["income", "expense"] | None = None,
+        merchant: str | None = None,
+    ) -> list[Transaction]:
+        year, number = _month_bounds(month)
+        return [
+            item
+            for item in self.transactions
+            if item.date.year == year
+            and item.date.month == number
+            and (category is None or item.category.casefold() == category.casefold())
+            and (kind is None or item.kind == kind)
+            and (
+                merchant is None
+                or (item.merchant is not None and item.merchant.casefold() == merchant.casefold())
+            )
+        ]
 
     def lookup_transactions(
         self,
@@ -109,15 +129,7 @@ class FinanceData:
         category: str | None = None,
         kind: Literal["income", "expense"] | None = None,
     ) -> LookupResult:
-        year, number = _month_bounds(month)
-        matches = [
-            item
-            for item in self.transactions
-            if item.date.year == year
-            and item.date.month == number
-            and (category is None or item.category == category)
-            and (kind is None or item.kind == kind)
-        ]
+        matches = self._matches(month, category=category, kind=kind)
         return LookupResult(
             month=month,
             category=category,
@@ -140,30 +152,132 @@ class FinanceData:
             rate=rate,
         )
 
-    def check_budget_rule(self, rule_id: str, month: str) -> BudgetResult:
-        caps = {
-            "dining_monthly_cap": ("dining", Decimal("500.00")),
-            "groceries_monthly_cap": ("groceries", Decimal("800.00")),
+    def _resolve_operand(self, operand: Operand, month: str) -> tuple[Decimal | None, dict[str, object]]:
+        if operand.value is not None:
+            return operand.value, {"value": operand.value, "unit": operand.unit}
+
+        metric = operand.metric
+        assert metric is not None
+        if metric in {"income", "expenses", "savings", "savings_rate"}:
+            savings = self.calculate_savings_rate(month)
+            values = {
+                "income": savings.income,
+                "expenses": savings.expenses,
+                "savings": savings.savings,
+                "savings_rate": savings.rate,
+            }
+            raw = values[metric]
+            value = None if raw is None else _money(raw * operand.multiplier)
+            return value, {
+                "metric": metric,
+                "raw": raw,
+                "multiplier": operand.multiplier,
+                "unit": operand.unit,
+            }
+
+        matches = self._matches(
+            month,
+            category=operand.category,
+            kind=operand.kind,
+            merchant=operand.merchant,
+        )
+        amounts = [item.amount for item in matches]
+        if metric == "transaction_count":
+            raw = Decimal(len(matches))
+        elif metric == "transaction_sum":
+            raw = sum(amounts, Decimal(0))
+        elif not amounts:
+            raw = None
+        elif metric == "transaction_average":
+            raw = sum(amounts, Decimal(0)) / len(amounts)
+        elif metric == "transaction_minimum":
+            raw = min(amounts)
+        else:
+            raw = max(amounts)
+        value = None if raw is None else _money(raw * operand.multiplier)
+        return value, {
+            "metric": metric,
+            "raw": raw,
+            "multiplier": operand.multiplier,
+            "kind": operand.kind,
+            "category": operand.category,
+            "merchant": operand.merchant,
+            "matched_transactions": len(matches),
+            "unit": operand.unit,
         }
-        if rule_id in caps:
-            category, limit = caps[rule_id]
-            observed = self.lookup_transactions(month, category=category, kind="expense").total
+
+    def check_budget_rule(self, rule_id: str, month: str) -> BudgetResult:
+        rule = next((item for item in self.budget_rules if item.rule_id == rule_id), None)
+        if rule is None:
+            raise ValueError(f"unknown budget rule: {rule_id}")
+        if not rule.supported:
             return BudgetResult(
-                rule_id=rule_id,
+                rule_id=rule.rule_id,
+                source_text=rule.source_text,
                 month=month,
-                status="over" if observed > limit else "within",
+                status="insufficient_evidence",
+                compliant=None,
+                observed=None,
+                limit=None,
+                unit=None,
+                reason=rule.unsupported_reason,
+            )
+
+        assert rule.left and rule.operator and rule.right
+        observed, left_evidence = self._resolve_operand(rule.left, month)
+        limit, right_evidence = self._resolve_operand(rule.right, month)
+        if observed is None or limit is None:
+            missing_status = "unavailable" if rule.rule_id == "minimum_savings_rate" else "insufficient_evidence"
+            return BudgetResult(
+                rule_id=rule.rule_id,
+                source_text=rule.source_text,
+                month=month,
+                status=missing_status,
+                compliant=None,
                 observed=observed,
                 limit=limit,
-                unit="RM",
+                unit=rule.left.unit,
+                operator=rule.operator,
+                evidence={"left": left_evidence, "right": right_evidence},
+                reason="the ledger does not contain enough data to resolve both operands",
             )
-        if rule_id == "minimum_savings_rate":
-            rate = self.calculate_savings_rate(month).rate
-            return BudgetResult(
-                rule_id=rule_id,
-                month=month,
-                status="unavailable" if rate is None else ("met" if rate >= 20 else "below"),
-                observed=rate,
-                limit=Decimal("20.00"),
-                unit="percent",
-            )
-        raise ValueError(f"unknown budget rule: {rule_id}")
+
+        comparisons = {
+            "lt": observed < limit,
+            "lte": observed <= limit,
+            "eq": observed == limit,
+            "gte": observed >= limit,
+            "gt": observed > limit,
+        }
+        compliant = comparisons[rule.operator]
+        is_cap = rule.operator in {"lt", "lte"} and rule.left.metric in {
+            "expenses",
+            "transaction_sum",
+            "transaction_average",
+            "transaction_maximum",
+            "transaction_count",
+        }
+        is_minimum = rule.operator in {"gt", "gte"} and rule.left.metric in {
+            "income",
+            "savings",
+            "savings_rate",
+        }
+        status = (
+            ("within" if compliant else "over")
+            if is_cap
+            else ("met" if compliant else "below")
+            if is_minimum
+            else ("compliant" if compliant else "violated")
+        )
+        return BudgetResult(
+            rule_id=rule.rule_id,
+            source_text=rule.source_text,
+            month=month,
+            status=status,
+            compliant=compliant,
+            observed=observed,
+            limit=limit,
+            unit=rule.left.unit,
+            operator=rule.operator,
+            evidence={"left": left_evidence, "right": right_evidence},
+        )

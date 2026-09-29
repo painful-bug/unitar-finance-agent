@@ -106,12 +106,15 @@ class GroqProvider:
 
 def _system_prompt(session: Session) -> str:
     categories = sorted({item.category for item in session.data.transactions})
+    budget_rules = "; ".join(
+        f"{rule.rule_id}: {rule.source_text}" for rule in session.data.budget_rules
+    )
     return (
         "You are a personal finance assistant. Answer only from the supplied ledger tools; "
         "never guess or do arithmetic yourself. Use tools for every financial value. "
         f"The session as-of date is {session.as_of_date.isoformat()}. "
         f"Known categories: {', '.join(categories)}. "
-        "Budget rule IDs: dining_monthly_cap, groceries_monthly_cap, minimum_savings_rate."
+        f"Budget rules: {budget_rules or 'none configured'}."
     )
 
 
