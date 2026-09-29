@@ -20,6 +20,7 @@ DEFAULT_RULES_TEXT = ", ".join(
         "Save at least 20% of monthly income.",
     )
 )
+RULE_EDITOR_VERSION = 1
 
 
 async def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -64,6 +65,19 @@ def _csv_text(source: str, upload: Any) -> str | None:
 def _rules_signature(source: str, upload: Any, rules_text: str) -> str:
     csv_bytes = upload.getvalue() if source == "Upload CSV" and upload is not None else b"demo"
     return hashlib.sha256(csv_bytes + b"\0" + rules_text.encode("utf-8")).hexdigest()
+
+
+def _restore_default_rules() -> None:
+    st.session_state.budget_rules_text = DEFAULT_RULES_TEXT
+    st.session_state.budget_rules_editor_version = RULE_EDITOR_VERSION
+    for key in (
+        "parsed_rules",
+        "rule_warnings",
+        "parsed_rules_signature",
+        "confirmed_rules",
+        "confirmed_rules_signature",
+    ):
+        st.session_state.pop(key, None)
 
 
 def _create_session(
@@ -288,10 +302,7 @@ def _render_settings(source: str, upload: Any) -> None:
         st.success("Custom rules confirmed for the next session.")
     else:
         st.info("New sessions currently use the built-in default rules.")
-    if st.button("Use built-in defaults"):
-        st.session_state.pop("confirmed_rules", None)
-        st.session_state.pop("confirmed_rules_signature", None)
-        st.rerun()
+    st.button("Use built-in defaults", on_click=_restore_default_rules)
 
 
 def render() -> None:
@@ -301,8 +312,8 @@ def render() -> None:
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if "budget_rules_text" not in st.session_state:
-        st.session_state.budget_rules_text = DEFAULT_RULES_TEXT
+    if st.session_state.get("budget_rules_editor_version") != RULE_EDITOR_VERSION:
+        _restore_default_rules()
 
     with st.sidebar:
         view = st.radio("View", ("Chat", "Settings"), horizontal=True)

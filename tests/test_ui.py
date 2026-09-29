@@ -93,6 +93,9 @@ def test_settings_can_add_or_remove_defaults_then_confirm_session_rules() -> Non
             for rule in [call for call in calls if call[0] == "create_finance_session"][-1][1]["budget_rules"]
         ] == ["savings_target"]
 
+        button(app, "Use built-in defaults").click().run(timeout=10)
+        assert app.text_area[0].value == DEFAULT_RULES_TEXT
+
 
 def test_context_panel_is_color_coded_safe_and_fullscreen_capable() -> None:
     panel = _context_panel_html(

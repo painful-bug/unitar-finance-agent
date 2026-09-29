@@ -164,11 +164,33 @@ def _slug(value: str) -> str:
     return (slug[:64] or "budget_rule").lstrip("0123456789_") or "budget_rule"
 
 
+def _canonical_rule_id(rule: BudgetRule) -> str:
+    if not rule.supported or not rule.left:
+        return _slug(rule.rule_id)
+    suffix = {
+        "lt": "cap",
+        "lte": "cap",
+        "eq": "target",
+        "gte": "minimum",
+        "gt": "minimum",
+    }[rule.operator]
+    left = rule.left
+    if left.metric == "transaction_sum":
+        subject = left.category or left.merchant or left.kind or "transactions"
+        return _slug(f"{subject}_monthly_{suffix}")
+    if left.metric == "transaction_count":
+        subject = left.category or left.merchant or left.kind or "transactions"
+        return _slug(f"{subject}_monthly_count_{suffix}")
+    if left.metric == "savings" and rule.right and rule.right.metric == "income":
+        return "savings_target"
+    return _slug(f"{suffix}_{left.metric}")
+
+
 def _normalize_ids(rules: Iterable[BudgetRule]) -> list[BudgetRule]:
     normalized: list[BudgetRule] = []
     used: set[str] = set()
     for index, rule in enumerate(rules, start=1):
-        base = _slug(rule.rule_id or f"budget_rule_{index}")
+        base = _canonical_rule_id(rule) or f"budget_rule_{index}"
         rule_id = base
         suffix = 2
         while rule_id in used:
@@ -177,6 +199,25 @@ def _normalize_ids(rules: Iterable[BudgetRule]) -> list[BudgetRule]:
         used.add(rule_id)
         normalized.append(rule.model_copy(update={"rule_id": rule_id}))
     return normalized
+
+
+def _source_numbers(text: str) -> set[Decimal]:
+    return {
+        Decimal(match.replace(",", ""))
+        for match in re.findall(r"\d+(?:,\d{3})*(?:\.\d+)?", text)
+    }
+
+
+def _unsupported(rule: BudgetRule, reason: str) -> BudgetRule:
+    return rule.model_copy(
+        update={
+            "supported": False,
+            "left": None,
+            "operator": None,
+            "right": None,
+            "unsupported_reason": reason,
+        }
+    )
 
 
 def parse_budget_rules(
@@ -188,20 +229,55 @@ def parse_budget_rules(
         raise ValueError("Enter at least one budget rule.")
     if len(rules_text) > 10_000:
         raise ValueError("Budget rules exceed 10,000 characters.")
+    category_values = sorted(set(categories), key=str.casefold)
     prompt = {
         "rules": rules_text,
-        "known_categories": sorted(set(categories)),
+        "known_categories": category_values,
         "instructions": [
+            "Act as a compiler, not a financial adviser. Never add assumptions or values.",
             "Compile each rule into one or more atomic monthly comparisons.",
             "Treat commas, semicolons, and line breaks between complete rules as separators.",
+            "Copy every numeric limit from the rule exactly; do not round, replace, or invent it.",
+            "Category filters must use the exact spelling of one supplied known_categories value.",
+            "Map an obvious synonym such as eating outside or restaurants to the closest known category; if more than one category could match, mark the rule unsupported.",
+            "For a spending maximum, use transaction_sum filtered to kind expense and operator lte.",
             "Use only the metrics and fields allowed by the supplied JSON schema.",
             "For percentages, use percentage points: 20% is the decimal value 20.",
             "Use multiplier 0.20 for a monetary target equal to 20% of another RM metric.",
             "Use transaction metrics with filters for category, merchant, kind, or counts.",
             "Do not calculate ledger values and do not invent categories.",
             "If a rule needs external facts, predictions, rolling windows, or unavailable fields, mark it unsupported and explain why.",
-            "Use concise snake_case rule IDs and preserve the original rule in source_text.",
+            "Use a concise semantic snake_case rule ID without embedding the numeric limit, and preserve the exact original rule in source_text.",
         ],
+        "example": {
+            "input": "Eating outside budget per month is maximum 500 RM.",
+            "known_categories": ["dining"],
+            "output": {
+                "rule_id": "dining_monthly_cap",
+                "source_text": "Eating outside budget per month is maximum 500 RM.",
+                "supported": True,
+                "left": {
+                    "metric": "transaction_sum",
+                    "unit": "RM",
+                    "multiplier": "1",
+                    "kind": "expense",
+                    "category": "dining",
+                    "merchant": None,
+                    "value": None,
+                },
+                "operator": "lte",
+                "right": {
+                    "metric": None,
+                    "value": "500",
+                    "unit": "RM",
+                    "multiplier": "1",
+                    "kind": None,
+                    "category": None,
+                    "merchant": None,
+                },
+                "unsupported_reason": None,
+            },
+        },
     }
     turn = provider.chat(
         [
@@ -220,26 +296,51 @@ def parse_budget_rules(
         raise ValueError("rule parser returned no content")
     parsed = BudgetRuleSet.model_validate_json(turn.content)
     rules = _normalize_ids(parsed.rules)
-    known = {category.casefold() for category in categories}
+    known = {category.casefold(): category for category in category_values}
+    source_numbers = _source_numbers(rules_text)
     warnings: list[str] = []
     validated: list[BudgetRule] = []
     for rule in rules:
-        unknown = [
-            operand.category
-            for operand in (rule.left, rule.right)
-            if operand and operand.category and operand.category.casefold() not in known
-        ]
+        operands = [operand for operand in (rule.left, rule.right) if operand]
+        unknown = [operand.category for operand in operands if operand.category and operand.category.casefold() not in known]
         if rule.supported and unknown:
-            reason = f"unknown ledger category: {unknown[0]}"
-            rule = rule.model_copy(
-                update={
-                    "supported": False,
-                    "left": None,
-                    "operator": None,
-                    "right": None,
-                    "unsupported_reason": reason,
-                }
+            rule = _unsupported(rule, f"unknown ledger category: {unknown[0]}")
+        elif rule.supported:
+            for side in ("left", "right"):
+                operand = getattr(rule, side)
+                if operand and operand.category:
+                    rule = rule.model_copy(
+                        update={side: operand.model_copy(update={"category": known[operand.category.casefold()]})}
+                    )
+            operands = [operand for operand in (rule.left, rule.right) if operand]
+            invented = next(
+                (
+                    operand.value
+                    for operand in operands
+                    if operand.value is not None and operand.value not in source_numbers
+                ),
+                None,
             )
+            if invented is not None:
+                rule = _unsupported(
+                    rule, f"compiled value {invented} is absent from the rule text"
+                )
+            else:
+                invented_multiplier = next(
+                    (
+                        operand.multiplier
+                        for operand in operands
+                        if operand.multiplier != 1
+                        and operand.multiplier not in source_numbers
+                        and operand.multiplier * 100 not in source_numbers
+                    ),
+                    None,
+                )
+                if invented_multiplier is not None:
+                    rule = _unsupported(
+                        rule,
+                        f"compiled multiplier {invented_multiplier} is absent from the rule text",
+                    )
         if not rule.supported:
             warnings.append(f"{rule.rule_id}: {rule.unsupported_reason}")
         validated.append(rule)

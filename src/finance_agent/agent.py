@@ -105,6 +105,7 @@ class GroqProvider:
         if tools:
             kwargs.update(tools=tools, tool_choice="auto")
         if response_model:
+            kwargs["temperature"] = 0
             kwargs["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {

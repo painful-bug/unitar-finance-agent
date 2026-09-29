@@ -38,12 +38,67 @@ class FakeParser:
         )
 
 
+class DiningParser:
+    def __init__(self, limit="500.00"):
+        self.limit = limit
+
+    def chat(self, messages, tools=None, response_model=None):
+        return AssistantTurn(
+            content=json.dumps(
+                {
+                    "rules": [
+                        {
+                            "rule_id": "dining_outside_cap",
+                            "source_text": "Eating outside budget per month is maximum 500 RM.",
+                            "supported": True,
+                            "left": {
+                                "metric": "transaction_sum",
+                                "unit": "RM",
+                                "kind": "expense",
+                                "category": "dining",
+                            },
+                            "operator": "lte",
+                            "right": {"value": self.limit, "unit": "RM"},
+                        }
+                    ]
+                }
+            )
+        )
+
+
 def test_llm_parser_returns_validated_reusable_expression() -> None:
     preview = parse_budget_rules("Save at least 20% of income.", ["groceries"], FakeParser())
 
     assert preview.warnings == []
     assert preview.rules[0].right.metric == "income"
     assert preview.rules[0].right.multiplier == Decimal("0.20")
+
+
+def test_dining_alias_uses_generator_categories_and_preserves_rm_limit() -> None:
+    categories = (category for category in ["dining", "groceries"])
+
+    preview = parse_budget_rules(
+        "Eating outside budget per month is maximum 500 RM.",
+        categories,
+        DiningParser(),
+    )
+
+    rule = preview.rules[0]
+    assert rule.supported is True
+    assert rule.rule_id == "dining_monthly_cap"
+    assert rule.left.category == "dining"
+    assert rule.right.value == Decimal("500.00")
+
+
+def test_parser_rejects_a_hallucinated_numeric_limit() -> None:
+    preview = parse_budget_rules(
+        "Eating outside budget per month is maximum 500 RM.",
+        ["dining"],
+        DiningParser(limit="700.00"),
+    )
+
+    assert preview.rules[0].supported is False
+    assert preview.rules[0].unsupported_reason == "compiled value 700.00 is absent from the rule text"
 
 
 def test_groq_schema_omits_unsupported_decimal_lookaround_regex() -> None:
@@ -75,6 +130,7 @@ def test_groq_schema_omits_unsupported_decimal_lookaround_regex() -> None:
         return []
 
     schema = completions.kwargs["response_format"]["json_schema"]["schema"]
+    assert completions.kwargs["temperature"] == 0
     assert all("(?" not in pattern for pattern in patterns(schema))
 
     def objects(value):
