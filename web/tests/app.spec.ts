@@ -6,13 +6,14 @@ test("persists a configured chat across reload and renders readable tool activit
   await expect(page.getByText("Agent service connected")).toBeVisible();
 
   await page.getByRole("button", { name: "Settings" }).last().click();
-  await expect(page.getByRole("heading", { name: "New chat data" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Make it work your way." })).toBeVisible();
+  await expect(page).toHaveURL(/\/settings$/);
   await page.getByLabel("Natural-language rules").fill("Save at least 25% of income.");
   await page.getByRole("button", { name: "Parse rules" }).click();
   await expect(page.getByRole("heading", { name: "Compiled preview" })).toBeVisible();
   await page.getByRole("button", { name: "Confirm these rules" }).click();
-  await expect(page.getByText("Custom rules are confirmed for the next chat.")).toBeVisible();
-  await page.getByRole("button", { name: "Close settings" }).click();
+  await expect(page.getByText("These rules are active for every chat.")).toBeVisible();
+  await page.getByRole("button", { name: "Back to chat" }).click();
 
   await page.getByLabel("Ask about your spending, budget, or savings").fill("What is my savings rate?");
   await page.getByRole("button", { name: "Send message" }).click();

@@ -46,6 +46,8 @@ def test_mcp_session_lifecycle_and_structured_results(tmp_path) -> None:
         async with Client(server) as client:
             tools = await client.list_tools()
             assert {tool.name for tool in tools.tools} == {
+                "get_app_settings",
+                "update_app_settings",
                 "parse_budget_rules",
                 "create_finance_session",
                 "ask_finance_agent",
@@ -109,9 +111,10 @@ def test_mcp_compaction_turn_contract_is_bounded_and_configurable() -> None:
             schemas = {tool.name: tool.input_schema for tool in tools.tools}
             create_turns = schemas["create_finance_session"]["properties"]["compaction_turns"]
             ask_turns = schemas["ask_finance_agent"]["properties"]["compaction_turns"]
-            assert create_turns["default"] == 15
-            assert create_turns["minimum"] == 5
-            assert create_turns["maximum"] == 100
+            assert create_turns["default"] is None
+            create_integer = next(item for item in create_turns["anyOf"] if item.get("type") == "integer")
+            assert create_integer["minimum"] == 5
+            assert create_integer["maximum"] == 100
             ask_integer = next(item for item in ask_turns["anyOf"] if item.get("type") == "integer")
             assert ask_integer["minimum"] == 5
             assert ask_integer["maximum"] == 100
@@ -128,9 +131,10 @@ def test_mcp_compaction_turn_contract_is_bounded_and_configurable() -> None:
             assert created.structured_content["compaction_turns"] == 5
 
             max_steps = schemas["create_finance_session"]["properties"]["max_agent_steps"]
-            assert max_steps["default"] == 15
-            assert max_steps["minimum"] == 1
-            assert max_steps["maximum"] == 100
+            assert max_steps["default"] is None
+            steps_integer = next(item for item in max_steps["anyOf"] if item.get("type") == "integer")
+            assert steps_integer["minimum"] == 1
+            assert steps_integer["maximum"] == 100
             assert "max_agent_steps" not in schemas["ask_finance_agent"]["properties"]
 
             configured = await client.call_tool("create_finance_session", {"max_agent_steps": 1})
@@ -196,4 +200,28 @@ def test_mcp_rule_preview_can_be_confirmed_into_a_session() -> None:
                 rule["rule_id"] for rule in custom_only.structured_content["budget_rules"]
             ] == ["savings_target"]
 
+    asyncio.run(scenario())
+
+
+def test_mcp_shared_settings_contract_and_ledger_mutation(tmp_path):
+    async def scenario():
+        store = SessionStore(provider=FakeProvider(), chat_store=ChatStore(tmp_path))
+        async with Client(build_server(store)) as client:
+            settings = await client.call_tool("get_app_settings", {})
+            assert settings.structured_content["max_agent_steps"] == 15
+            assert settings.structured_content["evaluation_judge"] == "auto"
+            judged = await client.call_tool("update_app_settings", {"evaluation_judge": "jev"})
+            assert judged.structured_content["evaluation_judge"] == "jev"
+            invalid = await client.call_tool("update_app_settings", {"max_agent_steps": "20"})
+            assert invalid.is_error
+            updated = await client.call_tool("update_app_settings", {"compaction_turns": 20, "max_agent_steps": 25})
+            assert updated.structured_content["compaction_turns"] == 20
+            created = await client.call_tool("create_finance_session", {})
+            assert created.structured_content["max_agent_steps"] == 25
+            thread_id = created.structured_content["session_id"]
+            replaced = await client.call_tool("update_chat_thread", {"thread_id": thread_id, "csv_text": "date,kind,category,amount\n2026-09-05,income,salary,2000", "upload_name": "new.csv"})
+            assert replaced.structured_content["as_of_date"] == "2026-09-05"
+            assert replaced.structured_content["summary"]["upload_name"] == "new.csv"
+            reset = await client.call_tool("update_app_settings", {"reset_rules": True})
+            assert len(reset.structured_content["budget_rules"]) == 3
     asyncio.run(scenario())

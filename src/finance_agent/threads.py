@@ -6,14 +6,50 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .budget import BudgetRule
+from .budget import BudgetRule, default_budget_rules
 from .models import AgentResult, ExecutionTraceEvent
 
 
 ContextMode = Literal["auto", "jev", "summary"]
 TurnState = Literal["pending", "complete", "interrupted"]
+
+
+class AppSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: Literal[1] = 1
+    rules_text: str = Field(default_factory=lambda: "\n".join(rule.source_text for rule in default_budget_rules()), max_length=10_000)
+    rules_draft: str = Field(default_factory=lambda: "\n".join(rule.source_text for rule in default_budget_rules()), max_length=10_000)
+    budget_rules: list[BudgetRule] = Field(default_factory=default_budget_rules, min_length=1, max_length=50)
+    context_mode: ContextMode = "auto"
+    evaluation_judge: Literal["auto", "jev", "llm"] = "auto"
+    compaction_turns: int = Field(default=15, strict=True, ge=5, le=100)
+    max_agent_steps: int = Field(default=15, strict=True, ge=1, le=100)
+
+    @field_validator("budget_rules")
+    @classmethod
+    def unique_rules(cls, rules: list[BudgetRule]) -> list[BudgetRule]:
+        if len({rule.rule_id for rule in rules}) != len(rules):
+            raise ValueError("Budget rule IDs must be unique")
+        return rules
+
+
+class LedgerMetadata(BaseModel):
+    ledger_source: Literal["demo", "upload"]
+    upload_name: str | None = None
+    as_of_date: date
+    transaction_count: int
+
+
+class TurnSettings(AppSettings):
+    # Old chat snapshots could intentionally contain no budget rules.
+    budget_rules: list[BudgetRule] = Field(default_factory=list)
+
+
+class LedgerChange(LedgerMetadata):
+    after_turn_count: int
+    changed_at: datetime
 
 
 def utc_now() -> datetime:
@@ -39,6 +75,8 @@ class ChatTurn(BaseModel):
     result: AgentResult | None = None
     execution_trace_version: Literal[1] | None = None
     execution_trace: list[ExecutionTraceEvent] = Field(default_factory=list)
+    ledger: LedgerMetadata | None = None
+    settings: TurnSettings | None = None
 
     @field_validator("turn_id")
     @classmethod
@@ -70,6 +108,7 @@ class ChatThreadRecord(BaseModel):
     max_agent_steps: int = Field(default=15, ge=1, le=100)
     messages: list[dict[str, Any]] = Field(default_factory=list)
     turns: list[ChatTurn] = Field(default_factory=list)
+    ledger_changes: list[LedgerChange] = Field(default_factory=list)
 
     @field_validator("thread_id")
     @classmethod
@@ -115,6 +154,7 @@ class ChatThreadDetail(BaseModel):
     compaction_turns: int
     max_agent_steps: int
     turns: list[ChatTurn]
+    ledger_changes: list[LedgerChange] = Field(default_factory=list)
 
 
 class DeleteChatThreadResult(BaseModel):
@@ -144,6 +184,7 @@ def thread_detail(record: ChatThreadRecord) -> ChatThreadDetail:
         compaction_turns=record.compaction_turns,
         max_agent_steps=record.max_agent_steps,
         turns=record.turns,
+        ledger_changes=record.ledger_changes,
     )
 
 
@@ -157,13 +198,27 @@ class ChatStore:
         )
 
     def save(self, record: ChatThreadRecord) -> None:
+        destination = self._record_path(record.thread_id)
+        self._write_json(destination, record.model_dump_json(indent=2))
+
+    def load_settings(self) -> AppSettings:
+        try:
+            return AppSettings.model_validate_json((self.path / "settings" / "app.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return AppSettings()
+
+    def save_settings(self, settings: AppSettings) -> None:
+        self._write_json(self.path / "settings" / "app.json", settings.model_dump_json(indent=2))
+
+    def _write_json(self, destination: Path, content: str) -> None:
         self.path.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.path.chmod(0o700)
-        destination = self._record_path(record.thread_id)
-        temporary = self.path / f".{record.thread_id}.{uuid4()}.tmp"
+        destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        destination.parent.chmod(0o700)
+        temporary = destination.parent / f".{destination.stem}.{uuid4()}.tmp"
         try:
-            temporary.write_text(record.model_dump_json(indent=2), encoding="utf-8")
-            temporary.chmod(0o600)
+            with open(temporary, "x", encoding="utf-8", opener=lambda path, flags: os.open(path, flags, 0o600)) as handle:
+                handle.write(content)
             temporary.replace(destination)
         finally:
             temporary.unlink(missing_ok=True)

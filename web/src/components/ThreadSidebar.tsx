@@ -36,6 +36,7 @@ interface ThreadSidebarProps {
   mobileOpen: boolean;
   collapsed: boolean;
   theme: Theme;
+  settingsActive?: boolean;
   onCloseMobile: () => void;
   onToggleCollapsed: () => void;
   onNewChat: () => void;
@@ -54,6 +55,7 @@ export function ThreadSidebar({
   mobileOpen,
   collapsed,
   theme,
+  settingsActive,
   onCloseMobile,
   onToggleCollapsed,
   onNewChat,
@@ -189,7 +191,7 @@ export function ThreadSidebar({
             <span className={`connection-dot is-${connectionStatus}`} aria-hidden="true" />
             <span>Agent service {connectionStatus}</span>
           </div>
-          <button type="button" onClick={onOpenSettings}><span aria-hidden="true">⚙</span><span>Settings</span></button>
+          <button type="button" aria-current={settingsActive ? "page" : undefined} onClick={onOpenSettings}><span aria-hidden="true">⚙</span><span>Settings</span></button>
           <button type="button" onClick={onToggleTheme}><span aria-hidden="true">{theme === "dark" ? "☀" : "☾"}</span><span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button>
         </footer>
       </aside>

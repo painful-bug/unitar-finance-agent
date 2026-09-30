@@ -1,11 +1,12 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 
+import { LedgerUpload, type LedgerUploadProps } from "./LedgerUpload";
 import { MarkdownContent } from "./MarkdownContent";
 import { ToolActivity } from "./ToolActivity";
 import type { ChatThreadDetail } from "../types";
 
 
-interface ChatPanelProps {
+interface ChatPanelProps extends LedgerUploadProps {
   thread: ChatThreadDetail | null;
   prompt: string;
   optimisticQuestion: string | null;
@@ -27,10 +28,14 @@ export function ChatPanel({
   onPromptChange,
   onSubmit,
   onViewTrace,
+  ledger, uploadPending, uploadError, ledgerDisabled, onUpload,
 }: ChatPanelProps) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const turns = thread?.turns ?? [];
+  const ledgerProps = { ledger, uploadPending, uploadError, ledgerDisabled, onUpload };
+  const changes = thread?.ledger_changes ?? [];
+  const ledgerMarkers = (after: number) => changes.filter((change) => change.after_turn_count === after).map((change, index) => <p className="ledger-change-marker" key={`${change.changed_at}-${index}`}><span aria-hidden="true">↻</span> Ledger changed to {change.ledger_source === "demo" ? "bundled demo" : change.upload_name ?? "uploaded CSV"}. New answers use fresh context.</p>);
 
   useEffect(() => {
     const input = textarea.current;
@@ -56,11 +61,13 @@ export function ChatPanel({
           <div className="empty-chat">
             <span className="empty-mark" aria-hidden="true">F</span>
             <h2>How can I help with your finances?</h2>
-            <p>Answers use only the active ledger. Local beta—not financial advice.</p>
+            <p>Explore your spending, check your budget, and see where your money goes.</p>
+            <LedgerUpload {...ledgerProps} />
           </div>
         ) : (
           <div className="transcript">
-            {turns.map((turn) => (
+            {ledgerMarkers(0)}
+            {turns.map((turn, index) => (
               <div className="turn" key={turn.turn_id}>
                 <article className="user-message" aria-label="user message">
                   <MarkdownContent content={turn.question} />
@@ -86,6 +93,7 @@ export function ChatPanel({
                 ) : (
                   <p className="pending-response" role="status"><span className="loading-dot" aria-hidden="true" />Thinking…</p>
                 )}
+                {ledgerMarkers(index + 1)}
               </div>
             ))}
             {optimisticQuestion && !turns.some((turn) => turn.question === optimisticQuestion && turn.state === "pending") && (
@@ -100,6 +108,7 @@ export function ChatPanel({
       </section>
 
       <div className="composer-region">
+        {(turns.length > 0 || optimisticQuestion) && <LedgerUpload {...ledgerProps} compact />}
         {error && <p className="inline-error" role="alert">{error}</p>}
         <form
           className="composer"

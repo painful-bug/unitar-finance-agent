@@ -32,6 +32,15 @@ def test_csv_validation_reports_the_bad_row() -> None:
         load_csv("date,kind,category,amount\n2026-07-01,other,x,-1")
 
 
+def test_csv_accepts_a_40k_row_ledger() -> None:
+    rows = "\n".join(
+        f"2026-07-{index % 28 + 1:02d},expense,groceries,1.00,Market"
+        for index in range(40_000)
+    )
+
+    assert len(load_csv(f"date,kind,category,amount,merchant\n{rows}")) == 40_000
+
+
 def test_zero_income_has_no_savings_rate() -> None:
     data = FinanceData(
         load_csv("date,kind,category,amount\n2026-07-01,expense,dining,10"),
@@ -40,3 +49,13 @@ def test_zero_income_has_no_savings_rate() -> None:
 
     assert data.calculate_savings_rate("2026-07").rate is None
     assert data.check_budget_rule("minimum_savings_rate", "2026-07").status == "unavailable"
+
+
+def test_shared_rule_for_absent_category_is_insufficient_evidence():
+    from datetime import date
+    from finance_agent.budget import default_budget_rules
+
+    ledger = FinanceData(load_csv("date,kind,category,amount\n2026-08-01,income,salary,1000"), date(2026, 8, 15), default_budget_rules())
+    result = ledger.check_budget_rule("dining_monthly_cap", "2026-08")
+    assert result.status == "insufficient_evidence" and result.compliant is None
+    assert "dining" in result.reason

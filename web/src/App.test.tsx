@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
-import type { AgentResult, AskFinanceAgentInput, ChatThreadDetail, ChatThreadSummary, SessionInfo, TraceEnvelope } from "./types";
+import type { AppSettings, UpdateAppSettingsInput, AgentResult, AskFinanceAgentInput, ChatThreadDetail, ChatThreadSummary, SessionInfo, TraceEnvelope } from "./types";
 
 
 const THREAD_ID = "8a68c223-7e5a-4adc-9f1a-9c18a8f87be0";
@@ -51,7 +51,11 @@ function mockClient(saved: ChatThreadDetail[] = []) {
     max_agent_steps: 15,
     ledger_source: "demo",
   };
+  let settings: AppSettings = { version: 1, rules_text: "Save 20%", rules_draft: "Save 20%", evaluation_judge: "auto", budget_rules: [{ rule_id: "savings", source_text: "Save 20%", supported: true }], context_mode: "auto", compaction_turns: 15, max_agent_steps: 15 };
   return {
+    getAppSettings: vi.fn().mockImplementation(async () => settings),
+    updateAppSettings: vi.fn().mockImplementation(async (input: UpdateAppSettingsInput) => { settings = { ...settings, ...input }; return settings; }),
+    closeFinanceSession: vi.fn().mockResolvedValue({ closed: true }),
     connect: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
     listChatThreads: vi.fn().mockImplementation(async () => ({ threads: [...records.values()].map((thread) => thread.summary), skipped_files: 0 })),
@@ -92,6 +96,20 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("persistent chat shell", () => {
+  it("lets Compact after turns be cleared before entering a new value", async () => {
+    window.history.replaceState({}, "", `/chat/${THREAD_ID}`);
+    const client = mockClient([detail()]);
+    render(<App client={client} />);
+    await screen.findByRole("heading", { name: "August review" });
+    fireEvent.click(screen.getAllByRole("button", { name: "Settings" })[1]);
+    const input = screen.getByLabelText("Compact after turns");
+    fireEvent.change(input, { target: { value: "" } });
+    expect(input).toHaveValue(null);
+    fireEvent.change(input, { target: { value: "5" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(client.updateAppSettings).toHaveBeenCalledWith({ compaction_turns: 5 }));
+  });
+
   it("opens a prompt's trace, preserves selection, and shares the inspector with Context", async () => {
     window.history.replaceState({}, "", `/chat/${THREAD_ID}`);
     render(<App client={mockClient([detail()])} />);
@@ -187,18 +205,23 @@ describe("persistent chat shell", () => {
     await waitFor(() => expect(client.updateChatThread).toHaveBeenCalledWith({ thread_id: THREAD_ID, title: "Monthly plan" }));
   });
 
-  it("shows immutable saved-chat data and persists mutable context settings", async () => {
+  it("shows full-page settings and updates shared configuration in an existing chat", async () => {
     window.history.replaceState({}, "", `/chat/${THREAD_ID}`);
     const client = mockClient([detail()]);
     render(<App client={client} />);
     await screen.findByRole("heading", { name: "August review" });
     fireEvent.click(screen.getAllByRole("button", { name: "Settings" })[0]);
 
-    expect(await screen.findByText("Start a new chat to use a different ledger, date, or rule set.")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Make it work your way." })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/settings");
+    expect(screen.queryByRole("dialog", { name: "Chat settings" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Evaluation judge"), { target: { value: "jev" } });
+    await waitFor(() => expect(client.updateAppSettings).toHaveBeenCalledWith({ evaluation_judge: "jev" }));
     fireEvent.change(screen.getByLabelText("Strategy"), { target: { value: "summary" } });
-    await waitFor(() => expect(client.updateChatThread).toHaveBeenCalledWith({ thread_id: THREAD_ID, context_mode: "summary" }));
+    await waitFor(() => expect(client.updateAppSettings).toHaveBeenCalledWith({ context_mode: "summary" }));
     fireEvent.change(screen.getByLabelText("Max agent steps"), { target: { value: "25" } });
-    await waitFor(() => expect(client.updateChatThread).toHaveBeenCalledWith({ thread_id: THREAD_ID, max_agent_steps: 25 }));
+    fireEvent.blur(screen.getByLabelText("Max agent steps"));
+    await waitFor(() => expect(client.updateAppSettings).toHaveBeenCalledWith({ max_agent_steps: 25 }));
   });
 
   it("keeps raw HTML inert in restored Markdown", async () => {
@@ -230,4 +253,122 @@ describe("persistent chat shell", () => {
 
     await act(async () => { finish(result); });
   });
+});
+
+function csvFile(name: string, text = "date,kind,category,amount\n2026-09-01,income,salary,2000") {
+  const file = new File([text], name, { type: "text/csv" });
+  Object.defineProperty(file, "arrayBuffer", { value: async () => new TextEncoder().encode(text).buffer });
+  return file;
+}
+
+describe("shared settings and chat ledgers", () => {
+  it("validates uploads in the chat pane, reuses the draft, and resets new chats to bundled data", async () => {
+    const client = mockClient();
+    client.createFinanceSession.mockResolvedValueOnce({ session_id: SECOND_ID, as_of_date: "2026-09-01", context_mode: "auto", transaction_count: 1, budget_rules: [], compaction_turns: 15, max_agent_steps: 15, ledger_source: "upload", upload_name: "income.csv" });
+    render(<App client={client} />);
+    await screen.findByText("Agent service connected");
+    expect(screen.getByRole("button", { name: "Choose CSV" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Ledger CSV"), { target: { files: [csvFile("income.csv")] } });
+    expect(await screen.findByRole("heading", { name: "income.csv" })).toBeInTheDocument();
+    expect(client.createFinanceSession).toHaveBeenCalledWith({ csv_text: expect.stringContaining("2000"), upload_name: "income.csv" });
+    fireEvent.change(screen.getByLabelText("Ask about your spending, budget, or savings"), { target: { value: "Use my CSV" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText("Calculated savings rate");
+    expect(client.createFinanceSession).toHaveBeenCalledTimes(1);
+    expect(client.askFinanceAgent).toHaveBeenCalledWith({ session_id: SECOND_ID, question: "Use my CSV", include_context: true }, expect.any(Function));
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    expect(screen.getByRole("heading", { name: "Bundled demo ledger" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Ask about your spending, budget, or savings"), { target: { value: "Use bundled data" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(client.createFinanceSession).toHaveBeenLastCalledWith({}));
+  });
+
+  it("retains the active ledger when a replacement fails", async () => {
+    const saved = detail();
+    saved.summary.ledger_source = "upload";
+    saved.summary.upload_name = "current.csv";
+    window.history.replaceState({}, "", `/chat/${THREAD_ID}`);
+    const client = mockClient([saved]);
+    client.updateChatThread.mockRejectedValue(new Error("CSV missing required columns: amount"));
+    render(<App client={client} />);
+    await screen.findByRole("heading", { name: "current.csv" });
+    fireEvent.change(screen.getByLabelText("Ledger CSV"), { target: { files: [csvFile("bad.csv", "bad,data")] } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("CSV missing required columns");
+    expect(screen.getByRole("heading", { name: "current.csv" })).toBeInTheDocument();
+    expect(screen.getByText("Savings are RM200.")).toBeInTheDocument();
+  });
+
+  it("preserves the composer and confirms global rules without creating a chat", async () => {
+    const client = mockClient();
+    client.parseBudgetRules.mockResolvedValue({ rules: [{ rule_id: "new_rule", source_text: "Save 25%", supported: true }] });
+    render(<App client={client} />);
+    await screen.findByText("Agent service connected");
+    fireEvent.change(screen.getByLabelText("Ask about your spending, budget, or savings"), { target: { value: "Keep my draft" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Settings" })[0]);
+    fireEvent.change(screen.getByLabelText("Natural-language rules"), { target: { value: "Save 25%" } });
+    fireEvent.blur(screen.getByLabelText("Natural-language rules"));
+    fireEvent.click(screen.getByRole("button", { name: "Parse rules" }));
+    await screen.findByRole("heading", { name: "Compiled preview" });
+    expect(client.updateAppSettings).not.toHaveBeenCalledWith(expect.objectContaining({ budget_rules: expect.anything() }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm these rules" }));
+    await waitFor(() => expect(client.updateAppSettings).toHaveBeenCalledWith({ rules_text: "Save 25%", rules_draft: "Save 25%", budget_rules: [{ rule_id: "new_rule", source_text: "Save 25%", supported: true }] }));
+    expect(client.createFinanceSession).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    expect(screen.getByLabelText("Ask about your spending, budget, or savings")).toHaveValue("Keep my draft");
+  });
+
+  it("keeps milestones while settings is open during an answer", async () => {
+    const client = mockClient([detail()]);
+    window.history.replaceState({}, "", `/chat/${THREAD_ID}`);
+    let progress!: (envelope: TraceEnvelope) => void;
+    let finish!: (result: AgentResult) => void;
+    client.askFinanceAgent.mockImplementation((_input, callback) => { progress = callback!; return new Promise((resolve) => { finish = resolve; }); });
+    render(<App client={client} />);
+    await screen.findByRole("heading", { name: "August review" });
+    fireEvent.change(screen.getByLabelText("Ask about your spending, budget, or savings"), { target: { value: "Running question" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(client.askFinanceAgent).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getAllByRole("button", { name: "Settings" })[0]);
+    expect(screen.getByLabelText("Max agent steps")).toBeEnabled();
+    act(() => progress({ version: 1, thread_id: THREAD_ID, turn_id: THREAD_ID, event: { sequence: 1, timestamp: "2026-09-30T08:00:00Z", operation_id: "prompt", stage: "prompt", state: "completed", payload: { question: "Running question" } } }));
+    fireEvent.change(screen.getByLabelText("Max agent steps"), { target: { value: "25" } });
+    fireEvent.blur(screen.getByLabelText("Max agent steps"));
+    await waitFor(() => expect(client.updateAppSettings).toHaveBeenCalledWith({ max_agent_steps: 25 }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    expect(screen.getByText("Running question")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Replace CSV" })).toBeDisabled();
+    await act(async () => finish(result));
+  });
+
+  it("supports direct settings routes and reports validation and save errors", async () => {
+    window.history.replaceState({}, "", "/settings");
+    const client = mockClient();
+    client.updateAppSettings.mockRejectedValue(new Error("disk full"));
+    render(<App client={client} />);
+    const input = await screen.findByLabelText("Compact after turns");
+    fireEvent.change(input, { target: { value: "3" } });
+    fireEvent.blur(input);
+    expect(screen.getByText("Enter a whole number from 5 to 100.")).toBeInTheDocument();
+    expect(client.updateAppSettings).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "25" } });
+    fireEvent.blur(input);
+    expect(await screen.findByRole("alert")).toHaveTextContent("disk full");
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    expect(window.location.pathname).toBe("/");
+  });
+});
+
+it("accepts dropped CSVs and preserves staged data when returning from settings", async () => {
+  const client = mockClient();
+  client.createFinanceSession.mockResolvedValueOnce({ session_id: SECOND_ID, as_of_date: "2026-09-01", context_mode: "auto", transaction_count: 1, budget_rules: [], compaction_turns: 15, max_agent_steps: 15, ledger_source: "upload", upload_name: "dropped.csv" });
+  render(<App client={client} />);
+  await screen.findByText("Agent service connected");
+  fireEvent.drop(screen.getByRole("region", { name: "Chat ledger" }), { dataTransfer: { files: [csvFile("dropped.csv")] } });
+  await screen.findByRole("heading", { name: "dropped.csv" });
+  fireEvent.click(screen.getAllByRole("button", { name: "Settings" })[0]);
+  fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+  expect(screen.getByRole("heading", { name: "dropped.csv" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await waitFor(() => expect(client.closeFinanceSession).toHaveBeenCalledWith({ session_id: SECOND_ID }));
+  expect(screen.getByRole("heading", { name: "Bundled demo ledger" })).toBeInTheDocument();
 });

@@ -11,7 +11,7 @@ test("selects repeated prompts independently, restores all traces, and persists 
   await page.getByRole("button", { name: "Trace", exact: true }).click();
   const trace = page.locator("#agent-trace");
   await expect(trace).toBeVisible();
-  await expect(trace.getByLabel("Prompt")).toHaveValue("");
+  await expect(trace.getByLabel("Prompt", { exact: true })).toHaveValue("");
   await expect(trace.getByRole("heading", { name: "Final outcome" })).toBeVisible();
   await expect(trace.locator("pre")).toHaveCount(0);
 
@@ -21,7 +21,7 @@ test("selects repeated prompts independently, restores all traces, and persists 
   await expect(transcript.locator(".assistant-message")).toHaveCount(2);
   await page.getByRole("button", { name: "Trace", exact: true }).click();
   await expect(trace.locator(".trace-turn")).toHaveCount(2);
-  const selector = trace.getByLabel("Prompt");
+  const selector = trace.getByLabel("Prompt", { exact: true });
   const firstId = await selector.locator("option").nth(1).getAttribute("value");
   const secondId = await selector.locator("option").nth(2).getAttribute("value");
   expect(firstId).not.toBe(secondId);

@@ -38,6 +38,31 @@ export interface BudgetRule {
   unsupported_reason?: string | null;
 }
 
+export interface AppSettings {
+  version: 1;
+  rules_text: string;
+  rules_draft: string;
+  budget_rules: BudgetRule[];
+  context_mode: ContextMode;
+  evaluation_judge: "auto" | "jev" | "llm";
+  compaction_turns: number;
+  max_agent_steps: number;
+}
+
+export type UpdateAppSettingsInput = Partial<Omit<AppSettings, "version">> & { reset_rules?: boolean };
+
+export interface LedgerMetadata {
+  ledger_source: "demo" | "upload";
+  upload_name?: string | null;
+  as_of_date: string;
+  transaction_count: number;
+}
+
+export interface LedgerChange extends LedgerMetadata {
+  after_turn_count: number;
+  changed_at: string;
+}
+
 export interface BudgetRulePreview {
   rules: BudgetRule[];
   warnings?: string[];
@@ -122,6 +147,8 @@ export interface ChatTurn {
   result?: AgentResult | null;
   execution_trace_version?: 1 | null;
   execution_trace?: ExecutionTraceEvent[];
+  ledger?: LedgerMetadata | null;
+  settings?: AppSettings | null;
 }
 
 export interface ExecutionTraceEvent {
@@ -152,6 +179,7 @@ export interface ChatThreadDetail {
   compaction_turns: number;
   max_agent_steps: number;
   turns: ChatTurn[];
+  ledger_changes?: LedgerChange[];
 }
 
 export interface ChatThreadList {
@@ -160,6 +188,9 @@ export interface ChatThreadList {
 }
 
 export interface UpdateChatThreadInput {
+  csv_text?: string;
+  upload_name?: string;
+  use_bundled_data?: boolean;
   thread_id: string;
   title?: string | null;
   context_mode?: ContextMode | null;

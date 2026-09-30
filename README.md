@@ -10,7 +10,7 @@ A framework-free personal finance assistant that answers from a validated ledger
 - Canonical session history with runtime-selectable `auto`, `jev`, and `summary` context modes.
 - Eight typed MCP tools covering finance sessions, budget-rule parsing, and persistent chat-thread lifecycle.
 - Bundled deterministic RM data plus per-chat CSV uploads stored with the local thread.
-- Ten golden evaluation cases with literal checks and a separate structured LLM judge.
+- Twelve golden evaluation cases using the instructor notebook method, with independent LLM and Jev judges.
 
 No agent framework, database, authentication, cloud sync, or general financial advice is included.
 
@@ -67,7 +67,7 @@ Set `MCP_UPSTREAM` when running the UI image outside Compose. It must be an MCP 
 
 ## CSV format
 
-Uploads are UTF-8 CSV files up to 1 MB and 5,000 rows:
+Uploads are UTF-8 CSV files up to 10 MB and 50,000 rows:
 
 ```csv
 date,kind,category,amount,merchant
@@ -75,7 +75,9 @@ date,kind,category,amount,merchant
 2026-07-03,expense,groceries,120.40,Market
 ```
 
-`kind` must be `income` or `expense`; amounts must be positive. After the first message, the uploaded CSV is retained in that chat's owner-readable JSON record so the conversation can resume after an MCP restart.
+`kind` must be `income` or `expense`; amounts must be positive. Choose or drop a CSV directly in the chat pane. Every **New chat** starts with the bundled demo unless you upload another CSV. Uploaded dates use the latest transaction date; bundled data uses `2026-08-15`.
+
+After the first message, the uploaded CSV is retained in that chat's owner-readable JSON record. **Replace CSV** and **Use bundled data** remain available between answers. A successful replacement keeps the visible transcript and traces, adds a ledger-change marker, and starts fresh model context. Invalid files leave the previous ledger intact.
 
 ## Saved chats
 
@@ -83,7 +85,7 @@ The sidebar lists saved chats newest first. A blank **New chat** is not written 
 
 Direct local runs store one validated JSON file per chat under `~/.finance-agent/chats/`. Set `FINANCE_CHAT_STORE_PATH` to use another directory. The directory is mode `0700`, files are mode `0600`, and writes use atomic replacement. These files are unencrypted and can contain uploaded financial data. Docker Compose stores them in the `finance_chat_data` named volume at `/data/chats`.
 
-Saved routes use `/chat/<thread-id>`, so refreshing or reopening a URL restores the transcript and rehydrates its finance session. Ledger, date, and confirmed rules stay fixed for that chat; context mode and compaction threshold remain editable.
+Saved routes use `/chat/<thread-id>`, so refreshing or reopening a URL restores the transcript and rehydrates its finance session. The ledger belongs to its chat. Budget rules, context strategy, compaction threshold, and agent step limit are shared by every chat and stored in `settings/app.json` inside the chat-store directory. Each answer records the settings and ledger metadata it used. Existing chat records remain readable; old per-chat settings do not override the shared configuration for new answers.
 
 ## Context modes
 
@@ -93,13 +95,15 @@ Saved routes use `/chat/<thread-id>`, so refreshing or reopening a URL restores 
 
 The canonical history is never overwritten, so a running session can switch modes. If both strategies fail, the request returns an error rather than sending uncontrolled context.
 
-The React product triggers compaction by user turn. The default is 15 turns, configurable from 5 to 100 in **Settings**. New-chat defaults are saved in browser `localStorage`; active-chat changes are stored in that chat's JSON record. From the threshold onward, every model request receives a freshly prepared compacted copy; evaluation code can still opt into the older token trigger explicitly.
+The React product triggers compaction after 15 user turns (configurable from 5 to 100 in **Settings**) or an estimated 8,000 tokens, whichever comes first. Settings are saved on the backend and apply to existing and new chats. From either threshold onward, every model request receives a freshly prepared compacted copy.
 
 ## Natural-language budget rules
 
-Open **Settings** in a new chat, edit the comma-separated built-in rules or add rules on new lines, and select **Parse rules**. Groq converts the text into a validated expression preview; confirm that preview before sending the first message. The saved expression is evaluated with exact `Decimal` arithmetic over the ledger. Unsupported rules remain visible and return `insufficient_evidence` instead of a guessed result.
+Open the full-page **Settings** view from any chat, edit the built-in rules or add rules on new lines, and select **Parse rules**. Groq converts the text into a validated expression preview; **Confirm these rules** activates it for every chat. Draft editing or failed parsing keeps the previous confirmed rules active. The saved expression is evaluated with exact `Decimal` arithmetic over the ledger. Unsupported rules remain visible and return `insufficient_evidence` instead of a guessed result.
 
-React stores confirmed rules in browser `localStorage`. Rules previously saved in `~/.finance-agent/rules.json` are not imported; confirm them once after switching to React.
+Rules and drafts persist on the backend. Previous browser-local agent preferences are ignored; a backend without shared settings starts with the built-in defaults. Category names are resolved against bundled, saved, and staged ledgers; a rule referring to a category absent from the active ledger returns `insufficient_evidence`.
+
+**Settings** uses the full content pane with the conversation sidebar, budget editor, context controls, and execution controls. Strategy selections save immediately; valid numeric values save on blur. Settings remain editable during an answer, and the next answer uses the saved configuration. Theme remains browser-local.
 
 For example, `Save at least 20% of monthly income` is stored as a comparison between savings and income multiplied by `0.20`. The actual income and target are resolved separately for every requested month.
 
@@ -115,11 +119,11 @@ The top-right theme control follows the operating-system theme on first use, the
 
 ```bash
 uv run pytest
-uv run --env-file .env finance-eval --version v1
-uv run --env-file .env finance-eval --version final --context-mode auto
+uv run --extra eval --env-file .env python tools/run_evaluation.py --judge both
+uv run --extra eval --env-file .env python tools/run_evaluation.py --judge both --repeats 3
 ```
 
-Evaluation reports are written to `evals/results/v1.json` and `evals/results/final.json`. The runner refuses to create reports without a Groq key; pass rates must come from real runs, not placeholders.
+Each evaluation creates a new directory under `evals/results/` with `report.md`, `results.json`, a readable `transcript.txt`, and frozen source/fixture snapshots. It runs actual `v0.1-baseline` code and the latest workspace code, then grades the same answers separately with the selected judges. Settings → Evaluation chooses `auto`, `jev`, or `llm`; `--judge` overrides it. See [the evaluation operating guide](docs/evaluation-guide.md) for setup, live-demo commands, resume behavior, and interpretation.
 
 CI runs the Python suite and package build, frontend lint/typecheck/unit/build checks, Playwright against a deterministic MCP fixture, and both container builds. It does not publish images or require provider credentials.
 

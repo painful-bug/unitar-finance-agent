@@ -2,40 +2,28 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ChatPanel } from "./components/ChatPanel";
 import { ContextPanel } from "./components/ContextPanel";
-import { SettingsPanel, type LedgerSource } from "./components/SettingsPanel";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { ThreadSidebar } from "./components/ThreadSidebar";
 import { TracePanel } from "./components/TracePanel";
 import { FinanceMcpClient } from "./lib/mcp";
-import {
-  DEFAULT_RULES_TEXT,
-  loadCompactionTurns,
-  loadMaxAgentSteps,
-  loadTheme,
-  RULE_EDITOR_VERSION,
-  loadRulePreferences,
-  rulesSignature,
-  saveRulePreferences,
-  saveCompactionTurns,
-  saveMaxAgentSteps,
-  saveTheme,
-  type Theme,
-  type RulePreferences,
-} from "./lib/preferences";
+import { loadTheme, saveTheme, type Theme } from "./lib/preferences";
 import type {
+  AppSettings,
+  UpdateAppSettingsInput,
   BudgetRule,
   ChatThreadDetail,
   ChatThreadSummary,
-  ContextMode,
   ContextReport,
-  CreateFinanceSessionInput,
   SessionInfo,
-  UpdateChatThreadInput,
 } from "./types";
 
 
 type ConnectionStatus = "connecting" | "connected" | "error";
 type FinanceClient = Pick<
   FinanceMcpClient,
+  | "getAppSettings"
+  | "updateAppSettings"
+  | "closeFinanceSession"
   | "connect"
   | "close"
   | "parseBudgetRules"
@@ -49,7 +37,7 @@ type FinanceClient = Pick<
 
 interface UploadLedger {
   name: string;
-  bytes: Uint8Array;
+  session: SessionInfo;
   text: string;
 }
 
@@ -57,7 +45,6 @@ interface AppProps {
   client?: FinanceClient;
 }
 
-const DEMO_SIGNATURE_BYTES = new TextEncoder().encode("demo");
 const THREAD_ROUTE = /^\/chat\/([0-9a-f-]{36})\/?$/i;
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -79,7 +66,7 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
   const [globalError, setGlobalError] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(window.location.pathname === "/settings");
   const [contextOpen, setContextOpen] = useState(false);
   const [traceOpen, setTraceOpen] = useState(false);
   const [traceSelection, setTraceSelection] = useState<string | null>(null);
@@ -89,20 +76,20 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
   const [deleteTarget, setDeleteTarget] = useState<ChatThreadSummary | null>(null);
   const deleteDialog = useRef<HTMLDialogElement>(null);
   const mobileMenuButton = useRef<HTMLButtonElement>(null);
+  const sidebarReturnFocus = useRef<HTMLElement | null>(null);
   const contextButton = useRef<HTMLButtonElement>(null);
 
-  const [source, setSource] = useState<LedgerSource>("demo");
   const [upload, setUpload] = useState<UploadLedger | null>(null);
-  const [uploadName, setUploadName] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState("");
   const [uploadPending, setUploadPending] = useState(false);
   const uploadRevision = useRef(0);
-  const ruleInputRevision = useRef(0);
-  const [draftContextMode, setDraftContextMode] = useState<ContextMode>("auto");
-  const [overrideDate, setOverrideDate] = useState(false);
-  const [asOfDate, setAsOfDate] = useState("");
-  const [draftCompactionTurns, setDraftCompactionTurns] = useState(loadCompactionTurns);
-  const [draftMaxAgentSteps, setDraftMaxAgentSteps] = useState(loadMaxAgentSteps);
+  const draftSession = useRef<string | null>(null);
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [rulesText, setRulesText] = useState("");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [settingsError, setSettingsError] = useState("");
+  const settingsQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const returnPath = useRef(window.history.state?.returnPath ?? "/");
   const [prompt, setPrompt] = useState("");
   const [chatError, setChatError] = useState("");
   const [asking, setAsking] = useState(false);
@@ -110,29 +97,36 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
   const [optimisticQuestion, setOptimisticQuestion] = useState<string | null>(null);
   const askingRef = useRef(false);
   const stablePath = useRef(window.location.pathname);
+  const runningChatPath = useRef<string | null>(null);
   const [theme, setTheme] = useState<Theme>(() => {
     const selected = loadTheme();
     document.documentElement.dataset.theme = selected;
     return selected;
   });
 
-  const [preferences, setPreferences] = useState<RulePreferences>(loadRulePreferences);
-  const [parsedRules, setParsedRules] = useState<BudgetRule[] | null>(preferences.confirmedRules);
+  const [parsedRules, setParsedRules] = useState<BudgetRule[] | null>(null);
+  const [parsedText, setParsedText] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [parsedSignature, setParsedSignature] = useState<string | null>(preferences.confirmedSignature);
-  const [signatureResult, setSignatureResult] = useState<{ ledgerBytes: Uint8Array; rulesText: string; signature: string } | null>(null);
   const [parsing, setParsing] = useState(false);
   const [rulesError, setRulesError] = useState("");
-
-  const ledgerBytes = source === "upload" && upload ? upload.bytes : DEMO_SIGNATURE_BYTES;
-  const contextMode = activeThread?.context_mode ?? draftContextMode;
-  const compactionTurns = activeThread?.compaction_turns ?? draftCompactionTurns;
+  const ruleInputRevision = useRef(0);
+  const compactionTurns = appSettings?.compaction_turns ?? 15;
   const pendingRun = activeThread?.turns.some((turn) => turn.state === "pending") ?? false;
   const busy = asking || pendingRun;
-  const maxAgentSteps = activeThread?.max_agent_steps ?? draftMaxAgentSteps;
-  const liveContext: ContextReport | null = [...(activeThread?.turns ?? [])]
+  const liveContext: ContextReport | null = (activeThread?.turns ?? [])
+    .slice(activeThread?.ledger_changes?.at(-1)?.after_turn_count ?? 0)
     .reverse()
     .find((turn) => turn.result?.context)?.result?.context ?? null;
+
+  const clearUpload = useCallback(() => {
+    uploadRevision.current += 1;
+    const old = draftSession.current;
+    draftSession.current = null;
+    if (old) void client.closeFinanceSession({ session_id: old }).catch(() => undefined);
+    setUpload(null);
+    setUploadError("");
+    setUploadPending(false);
+  }, [client]);
 
   const refreshThreads = useCallback(async () => {
     const result = await client.listChatThreads();
@@ -147,6 +141,7 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
       const detail = await client.getChatThread(threadId);
       setActiveThread(detail);
       askingRef.current = detail.turns.some((turn) => turn.state === "pending");
+      runningChatPath.current = `/chat/${detail.summary.thread_id}`;
       setOptimisticQuestion(null);
       setChatError("");
       document.title = `${detail.summary.title} · Finance Agent`;
@@ -164,8 +159,11 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
     try {
       await client.connect();
       setConnectionStatus("connected");
+      const settings = await client.getAppSettings();
+      setAppSettings(settings);
+      setRulesText(settings.rules_draft);
       await refreshThreads();
-      const threadId = routedThreadId();
+      const threadId = routedThreadId() ?? (window.location.pathname === "/settings" ? returnPath.current.match(THREAD_ROUTE)?.[1] : null);
       if (threadId) await loadThread(threadId);
     } catch (error) {
       setConnectionStatus("error");
@@ -176,19 +174,24 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
   useEffect(() => {
     const initialLoad = window.setTimeout(() => void connectAndLoad(), 0);
     const navigateHistory = () => {
-      if (askingRef.current) {
+      const isSettings = window.location.pathname === "/settings";
+      const threadId = routedThreadId();
+      if (askingRef.current && !isSettings && window.location.pathname !== runningChatPath.current) {
         window.history.pushState({}, "", stablePath.current);
         return;
       }
+      const previousPath = stablePath.current;
       stablePath.current = window.location.pathname;
+      setSettingsOpen(isSettings);
       setTraceOpen(false);
-      setTraceSelection(null);
       setContextOpen(false);
-      const threadId = routedThreadId();
-      if (threadId) void loadThread(threadId);
-      else {
+      if (isSettings) {
+        returnPath.current = window.history.state?.returnPath ?? returnPath.current;
+      } else if (threadId) {
+        if (!askingRef.current) { clearUpload(); void loadThread(threadId); }
+      } else if (!askingRef.current) {
+        if (previousPath !== "/settings") clearUpload();
         setActiveThread(null);
-        setContextOpen(false);
         document.title = "Personal Finance Agent";
       }
     };
@@ -197,9 +200,13 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
       requestRevision.current += 1;
       window.clearTimeout(initialLoad);
       window.removeEventListener("popstate", navigateHistory);
-      void client.close();
+      const draft = draftSession.current;
+      void (async () => {
+        if (draft) await client.closeFinanceSession({ session_id: draft }).catch(() => undefined);
+        await client.close();
+      })();
     };
-  }, [client, connectAndLoad, loadThread]);
+  }, [client, connectAndLoad, loadThread, clearUpload]);
 
   useEffect(() => {
     if (!pendingRun || asking || !activeThread) return;
@@ -225,58 +232,72 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
   }, [pendingRun, asking, activeThread, client, refreshThreads]);
 
   useEffect(() => {
-    let current = true;
-    void rulesSignature(ledgerBytes, preferences.rulesText).then((signature) => {
-      if (current) setSignatureResult({ ledgerBytes, rulesText: preferences.rulesText, signature });
-    });
-    return () => { current = false; };
-  }, [ledgerBytes, preferences.rulesText]);
-
-  useEffect(() => {
     const dialog = deleteDialog.current;
     if (!dialog) return;
     if (deleteTarget && !dialog.open) dialog.showModal();
     if (!deleteTarget && dialog.open) dialog.close();
   }, [deleteTarget]);
 
-  const currentSignature = signatureResult?.ledgerBytes === ledgerBytes && signatureResult.rulesText === preferences.rulesText
-    ? signatureResult.signature
-    : null;
-  const signaturePending = currentSignature === null;
-  const previewCurrent = Boolean(parsedRules && currentSignature && parsedSignature === currentSignature);
-  const confirmedCurrent = Boolean(preferences.confirmedRules && currentSignature && preferences.confirmedSignature === currentSignature);
-
-  const csvText = (): string | undefined => {
-    if (source === "demo") return undefined;
-    if (!upload) throw new Error(uploadError || "Choose a CSV file first.");
-    return upload.text;
+  const saveSettings = (input: UpdateAppSettingsInput): Promise<AppSettings | null> => {
+    setSaveStatus("saving");
+    setSettingsError("");
+    const request = settingsQueue.current.then(async () => {
+      setSaveStatus("saving");
+      try {
+        const settings = await client.updateAppSettings(input);
+        setAppSettings(settings);
+        setSaveStatus("saved");
+        return settings;
+      } catch (error) {
+        setSaveStatus("error");
+        setSettingsError(errorMessage(error, "Could not save settings."));
+        return null;
+      }
+    });
+    settingsQueue.current = request;
+    return request;
   };
 
-  const selectUpload = (file: File | null) => {
+  const selectUpload = async (file: File | null) => {
+    if (busy || loadingThread) return;
     const revision = ++uploadRevision.current;
-    ruleInputRevision.current += 1;
-    setUpload(null);
-    setUploadName(file?.name ?? null);
     setUploadError("");
-    if (!file) { setUploadPending(false); return; }
     setUploadPending(true);
-    void file.arrayBuffer()
-      .then((buffer) => {
-        const bytes = new Uint8Array(buffer);
-        const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-        if (revision === uploadRevision.current) setUpload({ name: file.name, bytes, text });
-      })
-      .catch(() => {
-        if (revision === uploadRevision.current) setUploadError("Ledger CSV must be valid UTF-8.");
-      })
-      .finally(() => { if (revision === uploadRevision.current) setUploadPending(false); });
+    try {
+      if (file && file.size > 10_000_000) throw new Error("CSV exceeds 10 MB.");
+      const text = file ? new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer()) : undefined;
+      if (revision !== uploadRevision.current) return;
+      if (activeThread) {
+        const detail = await client.updateChatThread({ thread_id: activeThread.summary.thread_id,
+          ...(file ? { csv_text: text, upload_name: file.name } : { use_bundled_data: true }) });
+        if (revision !== uploadRevision.current) return;
+        setActiveThread(detail);
+        setContextOpen(false);
+        setTraceOpen(false);
+        await refreshThreads();
+      } else if (file && text !== undefined) {
+        const session = await client.createFinanceSession({ csv_text: text, upload_name: file.name });
+        if (revision !== uploadRevision.current) {
+          void client.closeFinanceSession({ session_id: session.session_id });
+          return;
+        }
+        const old = draftSession.current;
+        draftSession.current = session.session_id;
+        if (old) void client.closeFinanceSession({ session_id: old }).catch(() => undefined);
+        setUpload({ name: file.name, text, session });
+      } else {
+        clearUpload();
+      }
+    } catch (error) {
+      if (revision === uploadRevision.current) setUploadError(errorMessage(error, "Could not read this CSV. Use a UTF-8 CSV file."));
+    } finally {
+      if (revision === uploadRevision.current) setUploadPending(false);
+    }
   };
 
-  const updateRulesText = (rulesText: string) => {
+  const updateRulesText = (text: string) => {
     ruleInputRevision.current += 1;
-    const next = { ...preferences, rulesText };
-    setPreferences(next);
-    saveRulePreferences(next);
+    setRulesText(text);
   };
 
   const parseRules = async () => {
@@ -284,57 +305,61 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
     setParsing(true);
     setRulesError("");
     try {
-      const selectedCsv = csvText();
-      const signature = await rulesSignature(ledgerBytes, preferences.rulesText);
-      const preview = await client.parseBudgetRules({ rules_text: preferences.rulesText, csv_text: selectedCsv });
+      const preview = await client.parseBudgetRules({ rules_text: rulesText, csv_text: upload?.text });
       if (revision !== ruleInputRevision.current) return;
-      const next: RulePreferences = { version: RULE_EDITOR_VERSION, rulesText: preferences.rulesText, confirmedRules: null, confirmedSignature: null };
       setParsedRules(preview.rules);
+      setParsedText(rulesText);
       setWarnings(preview.warnings ?? []);
-      setParsedSignature(signature);
-      setPreferences(next);
-      saveRulePreferences(next);
     } catch (error) {
       if (revision === ruleInputRevision.current) setRulesError(errorMessage(error, "Could not parse budget rules."));
     } finally { setParsing(false); }
   };
 
-  const confirmRules = () => {
-    if (!parsedRules || !currentSignature || parsedSignature !== currentSignature) return;
-    const next = { ...preferences, confirmedRules: parsedRules, confirmedSignature: currentSignature };
-    setPreferences(next);
-    saveRulePreferences(next);
+  const confirmRules = async () => {
+    if (!parsedRules?.length || parsedText !== rulesText) return;
+    await saveSettings({ rules_draft: rulesText, rules_text: rulesText, budget_rules: parsedRules });
   };
 
-  const resetRules = () => {
-    const next: RulePreferences = { version: RULE_EDITOR_VERSION, rulesText: DEFAULT_RULES_TEXT, confirmedRules: null, confirmedSignature: null };
-    setPreferences(next);
+  const resetRules = async () => {
+    const settings = await saveSettings({ reset_rules: true });
+    if (!settings) return;
+    updateRulesText(settings.rules_draft);
     setParsedRules(null);
     setWarnings([]);
-    setParsedSignature(null);
     setRulesError("");
-    saveRulePreferences(next);
   };
 
   const createSession = async (): Promise<SessionInfo> => {
-    const signature = await rulesSignature(ledgerBytes, preferences.rulesText);
-    const input: CreateFinanceSessionInput = {
-      context_mode: draftContextMode,
-      compaction_turns: draftCompactionTurns,
-      max_agent_steps: draftMaxAgentSteps,
-    };
-    const selectedCsv = csvText();
-    if (selectedCsv !== undefined) {
-      input.csv_text = selectedCsv;
-      input.upload_name = upload?.name ?? null;
-    }
-    if (overrideDate && asOfDate) input.as_of_date = asOfDate;
-    if (preferences.confirmedRules && preferences.confirmedSignature === signature) input.budget_rules = preferences.confirmedRules;
-    return client.createFinanceSession(input);
+    if (upload) return upload.session;
+    return client.createFinanceSession({});
+  };
+
+  const openSettings = () => {
+    if (!settingsOpen) returnPath.current = stablePath.current;
+    stablePath.current = "/settings";
+    window.history.pushState({ returnPath: returnPath.current }, "", "/settings");
+    setSettingsOpen(true);
+    setSidebarOpen(false);
+    setContextOpen(false);
+    setTraceOpen(false);
+    void client.getAppSettings().then((settings) => {
+      setAppSettings(settings);
+      setRulesText((current) => current === appSettings?.rules_draft ? settings.rules_draft : current);
+    }).catch((error) => setSettingsError(errorMessage(error, "Could not load settings.")));
+  };
+
+  const closeSettings = () => {
+    const path = activeThread ? `/chat/${activeThread.summary.thread_id}` : returnPath.current;
+    stablePath.current = path;
+    window.history.pushState({}, "", path);
+    setSettingsOpen(false);
+    window.setTimeout(() => document.getElementById("chat-prompt")?.focus(), 0);
   };
 
   const navigateToThread = async (threadId: string) => {
     if (askingRef.current) return;
+    clearUpload();
+    setSettingsOpen(false);
     stablePath.current = `/chat/${threadId}`;
     window.history.pushState({}, "", stablePath.current);
     setSidebarOpen(false);
@@ -347,6 +372,8 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
 
   const newChat = () => {
     if (askingRef.current) return;
+    clearUpload();
+    setSettingsOpen(false);
     stablePath.current = "/";
     window.history.pushState({}, "", stablePath.current);
     setActiveThread(null);
@@ -362,9 +389,14 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
     window.setTimeout(() => document.getElementById("chat-prompt")?.focus(), 0);
   };
 
+  const openSidebar = () => {
+    sidebarReturnFocus.current = document.activeElement as HTMLElement;
+    setSidebarOpen(true);
+  };
+
   const closeSidebar = () => {
     setSidebarOpen(false);
-    mobileMenuButton.current?.focus();
+    (sidebarReturnFocus.current?.isConnected ? sidebarReturnFocus.current : mobileMenuButton.current)?.focus();
   };
 
   const closeContext = () => {
@@ -389,34 +421,41 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
 
   const askQuestion = async () => {
     const question = prompt.trim();
-    if (!question || askingRef.current || busy) return;
+    if (!question || askingRef.current || busy || uploadPending || !appSettings || connectionStatus !== "connected") return;
     askingRef.current = true;
     setAsking(true);
     setChatError("");
     setOptimisticQuestion(question);
     setPrompt("");
-    const turns = activeThread?.turns.length ?? 0;
+    const turns = (activeThread?.turns.length ?? 0) - (activeThread?.ledger_changes?.at(-1)?.after_turn_count ?? 0);
     setCompacting(turns + 1 >= compactionTurns);
     let sessionId = activeThread?.summary.thread_id ?? null;
+    runningChatPath.current = sessionId ? `/chat/${sessionId}` : null;
     let createdSession: SessionInfo | null = null;
     let recoveredPending = false;
+    const submittedTurnCount = activeThread?.turns.length ?? 0;
     const revision = ++requestRevision.current;
     try {
       if (!sessionId) {
         const created = await createSession();
         createdSession = created;
         sessionId = created.session_id;
-        stablePath.current = `/chat/${sessionId}`;
-        window.history.pushState({}, "", stablePath.current);
+        runningChatPath.current = `/chat/${sessionId}`;
+        draftSession.current = null;
+        returnPath.current = `/chat/${sessionId}`;
+        if (stablePath.current === "/settings") {
+          window.history.replaceState({ returnPath: returnPath.current }, "", "/settings");
+        } else {
+          stablePath.current = `/chat/${sessionId}`;
+          window.history.pushState({}, "", stablePath.current);
+        }
       }
       await client.askFinanceAgent({
         session_id: sessionId,
         question,
-        context_mode: contextMode,
         include_context: true,
-        compaction_turns: compactionTurns,
       }, (envelope) => {
-        if (revision !== requestRevision.current || envelope.thread_id !== sessionId || stablePath.current !== `/chat/${sessionId}`) return;
+        if (revision !== requestRevision.current || envelope.thread_id !== sessionId) return;
         const event = envelope.event;
         setActiveThread((current) => {
           if (current && current.summary.thread_id !== envelope.thread_id) return current;
@@ -450,7 +489,7 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
           const detail = await client.getChatThread(sessionId);
           recoveredPending = detail.turns.some((turn) => turn.state === "pending");
           setActiveThread(detail);
-          setOptimisticQuestion(null);
+          if (detail.turns.length > submittedTurnCount) setOptimisticQuestion(null);
           await refreshThreads();
         } catch {
           // Keep the submitted question visible when it could not be persisted.
@@ -461,18 +500,6 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
       askingRef.current = recoveredPending;
       setAsking(false);
       setCompacting(false);
-    }
-  };
-
-  const updateThread = async (input: Omit<UpdateChatThreadInput, "thread_id">) => {
-    if (!activeThread || busy) return;
-    setGlobalError("");
-    try {
-      const detail = await client.updateChatThread({ thread_id: activeThread.summary.thread_id, ...input });
-      setActiveThread(detail);
-      await refreshThreads();
-    } catch (error) {
-      setGlobalError(errorMessage(error, "Could not update this chat."));
     }
   };
 
@@ -511,12 +538,12 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
   const headerTitle = activeThread?.summary.title ?? "New chat";
   const headerMeta = activeThread
     ? `${activeThread.summary.ledger_source === "demo" ? "Demo ledger" : activeThread.summary.upload_name ?? "Uploaded ledger"} · ${activeThread.transaction_count} transactions · ${activeThread.as_of_date}`
-    : "Configure the ledger in Settings, then start a conversation.";
+    : "Use the bundled ledger, or add your own CSV right here.";
 
   return (
     <>
-      <a className="skip-link" href="#chat-main">Skip to conversation</a>
-      <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${contextOpen || traceOpen ? "context-open" : ""}`}>
+      <a className="skip-link" href={settingsOpen ? "#settings-title" : "#chat-main"}>Skip to {settingsOpen ? "settings" : "conversation"}</a>
+      <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${!settingsOpen && (contextOpen || traceOpen) ? "context-open" : ""}`}>
         <ThreadSidebar
           threads={threads}
           activeId={activeThread?.summary.thread_id ?? null}
@@ -531,18 +558,19 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
           onSelect={(threadId) => void navigateToThread(threadId)}
           onRename={renameThread}
           onDelete={setDeleteTarget}
-          onOpenSettings={() => setSettingsOpen(true)}
+          settingsActive={settingsOpen}
+          onOpenSettings={openSettings}
           onToggleTheme={toggleTheme}
         />
 
-        <main id="chat-main" className="chat-main">
+        <main id="chat-main" className="chat-main" hidden={settingsOpen}>
           <header className="chat-header">
-            <button ref={mobileMenuButton} className="icon-button mobile-menu-button" type="button" aria-label="Open conversations" onClick={() => setSidebarOpen(true)}>☰</button>
+            <button ref={mobileMenuButton} className="icon-button mobile-menu-button" type="button" aria-label="Open conversations" onClick={openSidebar}>☰</button>
             <div className="chat-heading"><h1>{headerTitle}</h1><p>{headerMeta}</p></div>
             <div className="header-actions">
               <button ref={contextButton} className="header-button" type="button" aria-pressed={contextOpen} onClick={() => { if (contextOpen) closeContext(); else { setTraceOpen(false); setContextOpen(true); } }}>Context</button>
               <button ref={traceButton} className="header-button" type="button" aria-pressed={traceOpen} onClick={() => { if (traceOpen) closeTrace(); else { traceReturnFocus.current = traceButton.current; setContextOpen(false); setTraceOpen(true); } }}>Trace</button>
-              <button className="header-button" type="button" onClick={() => setSettingsOpen(true)}>Settings</button>
+              <button className="header-button" type="button" onClick={openSettings}>Settings</button>
             </div>
           </header>
 
@@ -557,58 +585,42 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
             thread={activeThread}
             prompt={prompt}
             optimisticQuestion={optimisticQuestion}
-            pending={busy || loadingThread}
+            pending={busy || loadingThread || uploadPending || !appSettings || connectionStatus !== "connected"}
             compacting={compacting}
             error={chatError}
             onPromptChange={setPrompt}
             onSubmit={() => void askQuestion()}
             onViewTrace={viewTrace}
+            ledger={activeThread ? { ledger_source: activeThread.summary.ledger_source, upload_name: activeThread.summary.upload_name,
+              transaction_count: activeThread.transaction_count, as_of_date: activeThread.as_of_date } : upload?.session ?? null}
+            uploadPending={uploadPending}
+            uploadError={uploadError}
+            ledgerDisabled={busy || loadingThread || connectionStatus !== "connected"}
+            onUpload={(file) => void selectUpload(file)}
           />
         </main>
 
-        <ContextPanel context={liveContext} open={contextOpen} onClose={closeContext} />
-        <TracePanel key={activeThread?.summary.thread_id ?? "new"} turns={activeThread?.turns ?? []} optimisticQuestion={optimisticQuestion} selectedTurnId={traceSelection} onSelectTurn={setTraceSelection} open={traceOpen} onClose={closeTrace} />
+        <ContextPanel context={liveContext} open={!settingsOpen && contextOpen} onClose={closeContext} />
+        <TracePanel key={activeThread?.summary.thread_id ?? "new"} turns={activeThread?.turns ?? []} optimisticQuestion={optimisticQuestion} selectedTurnId={traceSelection} onSelectTurn={setTraceSelection} open={!settingsOpen && traceOpen} onClose={closeTrace} />
 
-        <SettingsPanel
-          open={settingsOpen}
-          disabled={busy}
-          thread={activeThread}
-          source={source}
-          onSourceChange={(next) => { ruleInputRevision.current += 1; setSource(next); }}
-          uploadName={uploadName}
-          onUploadChange={selectUpload}
-          uploadError={uploadError}
-          uploadPending={uploadPending}
-          contextMode={contextMode}
-          onContextModeChange={(mode) => activeThread ? void updateThread({ context_mode: mode }) : setDraftContextMode(mode)}
-          overrideDate={overrideDate}
-          onOverrideDateChange={setOverrideDate}
-          asOfDate={asOfDate}
-          onAsOfDateChange={setAsOfDate}
-          compactionTurns={compactionTurns}
-          onCompactionTurnsChange={(turns) => {
-            if (activeThread) void updateThread({ compaction_turns: turns });
-            else { setDraftCompactionTurns(turns); saveCompactionTurns(turns); }
-          }}
-          maxAgentSteps={maxAgentSteps}
-          onMaxAgentStepsChange={(steps) => {
-            if (activeThread) void updateThread({ max_agent_steps: steps });
-            else { setDraftMaxAgentSteps(steps); saveMaxAgentSteps(steps); }
-          }}
-          rulesText={preferences.rulesText}
+        {settingsOpen && <SettingsPanel
+          settings={appSettings}
+          rulesText={rulesText}
           onRulesTextChange={updateRulesText}
+          onSaveDraft={() => { if (rulesText !== appSettings?.rules_draft) void saveSettings({ rules_draft: rulesText }); }}
+          onSave={(input) => void saveSettings(input)}
           parsedRules={parsedRules}
           warnings={warnings}
-          previewCurrent={previewCurrent}
-          confirmedCurrent={confirmedCurrent}
-          signaturePending={signaturePending || uploadPending}
+          previewCurrent={Boolean(parsedRules && parsedText === rulesText)}
           parsing={parsing}
-          error={rulesError}
+          error={rulesError || settingsError || connectionError || globalError}
+          saveStatus={saveStatus}
           onParse={() => void parseRules()}
-          onConfirm={confirmRules}
-          onReset={resetRules}
-          onClose={() => setSettingsOpen(false)}
-        />
+          onConfirm={() => void confirmRules()}
+          onReset={() => void resetRules()}
+          onBack={closeSettings}
+          onOpenSidebar={openSidebar}
+        />}
 
         <dialog ref={deleteDialog} className="confirm-dialog" aria-labelledby="delete-chat-title" onClose={() => setDeleteTarget(null)} onCancel={() => setDeleteTarget(null)}>
           <h2 id="delete-chat-title">Delete chat?</h2>

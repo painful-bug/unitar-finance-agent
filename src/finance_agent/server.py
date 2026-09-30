@@ -7,11 +7,13 @@ import os
 from concurrent.futures import Future
 from datetime import date
 from importlib.resources import files
+from threading import RLock
 from time import monotonic
 from typing import Annotated, Awaitable, Callable, Literal
 from uuid import UUID, uuid4
 
 from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel, Field
 
 from .agent import ChatProvider, GroqProvider, run_agent
@@ -20,6 +22,10 @@ from .context import ContextManager
 from .finance import FinanceData, load_csv
 from .models import AgentResult, ContextReport, ExecutionTraceEvent, Session
 from .threads import (
+    AppSettings,
+    TurnSettings,
+    LedgerMetadata,
+    LedgerChange,
     ChatStore,
     ChatThreadDetail,
     ChatThreadList,
@@ -72,20 +78,74 @@ class SessionStore:
         self.provider = provider
         self.context_manager = context_manager or ContextManager()
         self.chat_store = chat_store or ChatStore()
+        # ponytail: serialize local settings writes; use a transactional store if multiple server processes are needed.
+        self.settings_lock = RLock()
+        self.settings = self.chat_store.load_settings()
         self.running: dict[str, asyncio.Task[AgentResult]] = {}
+
+    def get_app_settings(self) -> AppSettings:
+        with self.settings_lock:
+            return self.settings.model_copy(deep=True)
+
+    def update_app_settings(self, **changes) -> AppSettings:
+        with self.settings_lock:
+            if changes.pop("reset_rules", False):
+                defaults = AppSettings()
+                changes.update(rules_text=defaults.rules_text, rules_draft=defaults.rules_draft, budget_rules=defaults.budget_rules)
+            changes = {key: value for key, value in changes.items() if value is not None}
+            if not changes:
+                raise ValueError("Provide at least one setting.")
+            if "budget_rules" in changes and "rules_text" not in changes:
+                changes["rules_text"] = "\n".join(rule.source_text for rule in changes["budget_rules"])
+            if "rules_text" in changes and "budget_rules" not in changes:
+                raise ValueError("Confirmed rule text requires compiled budget rules.")
+            candidate = AppSettings.model_validate({**self.settings.model_dump(), **changes})
+            self.chat_store.save_settings(candidate)
+            self.settings = candidate
+            return self.get_app_settings()
+
+    def _detail(self, record: ChatThreadRecord) -> ChatThreadDetail:
+        detail = thread_detail(record).model_copy(deep=True)
+        settings = self.get_app_settings()
+        for field in ("context_mode", "compaction_turns", "max_agent_steps", "budget_rules"):
+            setattr(detail, field, getattr(settings, field))
+        return detail
+
+    @staticmethod
+    def _ledger(record: ChatThreadRecord) -> LedgerMetadata:
+        return LedgerMetadata(**record.model_dump(include={"ledger_source", "upload_name", "as_of_date", "transaction_count"}))
+
+    def _snapshot_legacy_turns(self, record: ChatThreadRecord) -> None:
+        ledger = self._ledger(record)
+        rules_text = "\n".join(rule.source_text for rule in record.budget_rules)
+        settings = TurnSettings(context_mode=record.context_mode, compaction_turns=record.compaction_turns,
+                                max_agent_steps=record.max_agent_steps, budget_rules=record.budget_rules,
+                                rules_text=rules_text, rules_draft=rules_text)
+        for turn in record.turns:
+            if turn.ledger is None:
+                turn.ledger = ledger
+            if turn.settings is None:
+                turn.settings = settings
 
     def create(
         self,
         csv_text: str | None = None,
         as_of_date: date | None = None,
-        context_mode: ContextMode = "auto",
+        context_mode: ContextMode | None = None,
         budget_rules: list[BudgetRule] | None = None,
-        compaction_turns: CompactionTurns = 15,
-        max_agent_steps: AgentSteps = 15,
+        compaction_turns: OptionalCompactionTurns = None,
+        max_agent_steps: OptionalAgentSteps = None,
         upload_name: str | None = None,
     ) -> SessionInfo:
         using_demo = csv_text is None
         transactions = load_csv(_demo_csv() if using_demo else csv_text)
+        changes = dict(context_mode=context_mode, compaction_turns=compaction_turns,
+                       max_agent_steps=max_agent_steps, budget_rules=budget_rules)
+        if any(value is not None for value in changes.values()):
+            self.update_app_settings(**changes)
+        settings = self.get_app_settings()
+        context_mode, compaction_turns, max_agent_steps = settings.context_mode, settings.compaction_turns, settings.max_agent_steps
+        budget_rules = settings.budget_rules
         anchor = as_of_date or (date(2026, 8, 15) if using_demo else max(row.date for row in transactions))
         session_id = str(uuid4())
         session = Session(
@@ -130,11 +190,18 @@ class SessionStore:
         rules_text: str,
         csv_text: str | None = None,
     ) -> BudgetRulePreview:
-        transactions = load_csv(_demo_csv() if csv_text is None else csv_text)
+        categories = {row.category for row in load_csv(_demo_csv())}
+        if csv_text is not None:
+            categories.update(row.category for row in load_csv(csv_text))
+        # ponytail: scan known local ledgers when parsing; cache category metadata if this becomes slow.
+        for summary in self.chat_store.list().threads:
+            record = self.records.get(summary.thread_id) or self.chat_store.load(summary.thread_id)
+            if record and record.csv_text:
+                categories.update(row.category for row in load_csv(record.csv_text))
         provider = self.provider or GroqProvider()
         return compile_budget_rules(
             rules_text,
-            (transaction.category for transaction in transactions),
+            categories,
             provider,
         )
 
@@ -206,12 +273,16 @@ class SessionStore:
             record = self.records[session_id]
             before_session_messages = copy.deepcopy(session.messages)
             before_record = record.model_copy(deep=True)
-            if context_mode:
-                session.context_mode = context_mode
-                record.context_mode = context_mode
-            if compaction_turns is not None:
-                session.compaction_turns = compaction_turns
-                record.compaction_turns = compaction_turns
+            self._snapshot_legacy_turns(record)
+            if context_mode is not None or compaction_turns is not None:
+                self.update_app_settings(context_mode=context_mode, compaction_turns=compaction_turns)
+            settings = self.get_app_settings()
+            session.context_mode = settings.context_mode
+            session.compaction_turns = settings.compaction_turns
+            session.max_agent_steps = settings.max_agent_steps
+            session.data.budget_rules = settings.budget_rules
+            record.context_mode, record.compaction_turns = settings.context_mode, settings.compaction_turns
+            record.max_agent_steps, record.budget_rules = settings.max_agent_steps, settings.budget_rules
             now = utc_now()
             if record.title_source == "auto" and not record.turns:
                 record.title = chat_title(question)
@@ -220,6 +291,8 @@ class SessionStore:
                 created_at=now,
                 question=question,
                 execution_trace_version=1,
+                ledger=self._ledger(record),
+                settings=TurnSettings(**settings.model_dump()),
             )
             record.turns.append(turn)
             record.updated_at = now
@@ -229,6 +302,8 @@ class SessionStore:
                 self.records[session_id] = before_record
                 session.context_mode = before_record.context_mode
                 session.compaction_turns = before_record.compaction_turns
+                session.max_agent_steps = before_record.max_agent_steps
+                session.data.budget_rules = before_record.budget_rules
                 raise
 
             loop = asyncio.get_running_loop()
@@ -310,7 +385,7 @@ class SessionStore:
         session = self._hydrate(thread_id)
         if not session:
             raise ValueError("Unknown chat thread.")
-        return thread_detail(self.records[thread_id]).model_copy(deep=True)
+        return self._detail(self.records[thread_id])
 
     async def update_chat_thread(
         self,
@@ -319,40 +394,52 @@ class SessionStore:
         context_mode: ContextMode | None = None,
         compaction_turns: OptionalCompactionTurns = None,
         max_agent_steps: OptionalAgentSteps = None,
+        csv_text: str | None = None,
+        upload_name: str | None = None,
+        use_bundled_data: bool = False,
     ) -> ChatThreadDetail:
         session = self._hydrate(thread_id)
         if not session:
             raise ValueError("Unknown chat thread.")
-        if title is None and context_mode is None and compaction_turns is None and max_agent_steps is None:
-            raise ValueError("Provide a title, context mode, compaction threshold, or agent step limit.")
+        replace_ledger = csv_text is not None or use_bundled_data
+        if csv_text is not None and use_bundled_data:
+            raise ValueError("Choose an uploaded CSV or bundled data, not both.")
+        if upload_name is not None and csv_text is None:
+            raise ValueError("An upload name requires CSV data.")
+        changes = dict(context_mode=context_mode, compaction_turns=compaction_turns, max_agent_steps=max_agent_steps)
+        if title is None and not replace_ledger and not any(value is not None for value in changes.values()):
+            raise ValueError("Provide a title, ledger, or shared setting.")
+        if (replace_ledger or title is not None) and thread_id in self.running:
+            raise ValueError("Wait for the current answer before changing this chat.")
+        if title is not None:
+            title = title.strip()
+            if not 1 <= len(title) <= 100:
+                raise ValueError("Title must contain 1 to 100 characters.")
+        transactions = load_csv(_demo_csv() if use_bundled_data else csv_text) if replace_ledger else None
         async with self.locks[thread_id]:
-            record = self.records[thread_id]
-            before = record.model_copy(deep=True)
+            record = self.records[thread_id].model_copy(deep=True)
             if title is not None:
-                title = title.strip()
-                if not 1 <= len(title) <= 100:
-                    raise ValueError("Title must contain 1 to 100 characters.")
-                record.title = title
-                record.title_source = "manual"
-            if context_mode is not None:
-                record.context_mode = context_mode
-                session.context_mode = context_mode
-            if compaction_turns is not None:
-                record.compaction_turns = compaction_turns
-                session.compaction_turns = compaction_turns
-            if max_agent_steps is not None:
-                record.max_agent_steps = max_agent_steps
-                session.max_agent_steps = max_agent_steps
-            record.updated_at = utc_now()
-            try:
+                record.title, record.title_source = title, "manual"
+            if transactions is not None:
+                self._snapshot_legacy_turns(record)
+                record.ledger_source = "demo" if use_bundled_data else "upload"
+                record.csv_text = None if use_bundled_data else csv_text
+                record.upload_name = None if use_bundled_data else upload_name
+                record.as_of_date = date(2026, 8, 15) if use_bundled_data else max(row.date for row in transactions)
+                record.transaction_count = len(transactions)
+                record.messages = []
+                record.ledger_changes.append(LedgerChange(**self._ledger(record).model_dump(),
+                                                         after_turn_count=len(record.turns), changed_at=utc_now()))
+            if title is not None or replace_ledger:
+                record.updated_at = utc_now()
                 self.chat_store.save(record)
-            except Exception:
-                self.records[thread_id] = before
-                session.context_mode = before.context_mode
-                session.compaction_turns = before.compaction_turns
-                session.max_agent_steps = before.max_agent_steps
-                raise
-            return thread_detail(record)
+                self.records[thread_id] = record
+                if transactions is not None:
+                    session.data = FinanceData(transactions, record.as_of_date, self.settings.budget_rules)
+                    session.as_of_date, session.messages = record.as_of_date, []
+            if any(value is not None for value in changes.values()):
+                self.update_app_settings(**changes)
+            return self._detail(record)
 
     async def delete_chat_thread(self, thread_id: str) -> DeleteChatThreadResult:
         UUID(thread_id)
@@ -416,33 +503,63 @@ def build_server(store: SessionStore | None = None) -> MCPServer:
     )
 
     @server.tool(structured_output=True)
+    def get_app_settings() -> AppSettings:
+        """Get the persistent settings shared by every chat."""
+        return sessions.get_app_settings()
+
+    @server.tool(structured_output=True)
+    def update_app_settings(
+        rules_draft: str | None = None,
+        rules_text: str | None = None,
+        budget_rules: list[BudgetRule] | None = None,
+        context_mode: ContextMode | None = None,
+        evaluation_judge: Literal["auto", "jev", "llm"] | None = None,
+        compaction_turns: OptionalCompactionTurns = None,
+        max_agent_steps: OptionalAgentSteps = None,
+        reset_rules: bool = False,
+    ) -> AppSettings:
+        """Save shared configuration. Running answers retain their starting settings."""
+        try:
+            return sessions.update_app_settings(rules_draft=rules_draft, rules_text=rules_text,
+                                               budget_rules=budget_rules, context_mode=context_mode, evaluation_judge=evaluation_judge,
+                                               compaction_turns=compaction_turns, max_agent_steps=max_agent_steps, reset_rules=reset_rules)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+
+    @server.tool(structured_output=True)
     def parse_budget_rules(
         rules_text: str,
         csv_text: str | None = None,
     ) -> BudgetRulePreview:
         """Compile natural-language monthly budget rules into a validated expression schema."""
-        return sessions.parse_budget_rules(rules_text, csv_text)
+        try:
+            return sessions.parse_budget_rules(rules_text, csv_text)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
 
     @server.tool(structured_output=True)
     def create_finance_session(
         csv_text: str | None = None,
         as_of_date: date | None = None,
-        context_mode: ContextMode = "auto",
+        context_mode: ContextMode | None = None,
         budget_rules: list[BudgetRule] | None = None,
-        compaction_turns: CompactionTurns = 15,
-        max_agent_steps: AgentSteps = 15,
+        compaction_turns: OptionalCompactionTurns = None,
+        max_agent_steps: OptionalAgentSteps = None,
         upload_name: str | None = None,
     ) -> SessionInfo:
         """Create an in-memory finance session from bundled data or validated ledger CSV."""
-        return sessions.create(
-            csv_text,
-            as_of_date,
-            context_mode,
-            budget_rules,
-            compaction_turns,
-            max_agent_steps,
-            upload_name,
-        )
+        try:
+            return sessions.create(
+                csv_text,
+                as_of_date,
+                context_mode,
+                budget_rules,
+                compaction_turns,
+                max_agent_steps,
+                upload_name,
+            )
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
 
     @server.tool(structured_output=True)
     async def ask_finance_agent(
@@ -482,11 +599,18 @@ def build_server(store: SessionStore | None = None) -> MCPServer:
         context_mode: ContextMode | None = None,
         compaction_turns: OptionalCompactionTurns = None,
         max_agent_steps: OptionalAgentSteps = None,
+        csv_text: str | None = None,
+        upload_name: str | None = None,
+        use_bundled_data: bool = False,
     ) -> ChatThreadDetail:
-        """Rename a chat thread or update its mutable context settings."""
-        return await sessions.update_chat_thread(
-            thread_id, title, context_mode, compaction_turns, max_agent_steps
-        )
+        """Rename or replace a chat ledger; legacy configuration updates shared settings."""
+        try:
+            return await sessions.update_chat_thread(
+                thread_id, title, context_mode, compaction_turns, max_agent_steps,
+                csv_text, upload_name, use_bundled_data,
+            )
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
 
     @server.tool(structured_output=True)
     async def delete_chat_thread(thread_id: str) -> DeleteChatThreadResult:

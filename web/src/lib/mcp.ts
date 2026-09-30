@@ -1,6 +1,8 @@
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
 import type {
+  AppSettings,
+  UpdateAppSettingsInput,
   AgentResult,
   AskFinanceAgentInput,
   BudgetRulePreview,
@@ -22,9 +24,11 @@ const EXPECTED_TOOLS = [
   "close_finance_session",
   "create_finance_session",
   "delete_chat_thread",
+  "get_app_settings",
   "get_chat_thread",
   "list_chat_threads",
   "parse_budget_rules",
+  "update_app_settings",
   "update_chat_thread",
 ] as const;
 
@@ -118,6 +122,15 @@ function assertExpectedTools(tools: Array<{ name: string }>): void {
         "`uv run --env-file .env finance-mcp`, then try again.",
     );
   }
+}
+
+function isAppSettings(value: unknown): value is AppSettings {
+  return isObject(value) && value.version === 1 && typeof value.rules_text === "string" &&
+    typeof value.rules_draft === "string" && Array.isArray(value.budget_rules) && value.budget_rules.length > 0 &&
+    ["auto", "jev", "summary"].includes(String(value.context_mode)) &&
+    ["auto", "jev", "llm"].includes(String(value.evaluation_judge)) &&
+    Number.isInteger(value.compaction_turns) && Number(value.compaction_turns) >= 5 && Number(value.compaction_turns) <= 100 &&
+    Number.isInteger(value.max_agent_steps) && Number(value.max_agent_steps) >= 1 && Number(value.max_agent_steps) <= 100;
 }
 
 function isBudgetRulePreview(value: unknown): value is BudgetRulePreview {
@@ -234,6 +247,14 @@ export class FinanceMcpClient {
     } finally {
       this.connecting = null;
     }
+  }
+
+  getAppSettings(): Promise<AppSettings> {
+    return this.call("get_app_settings", {}, isAppSettings);
+  }
+
+  updateAppSettings(input: UpdateAppSettingsInput): Promise<AppSettings> {
+    return this.call("update_app_settings", input, isAppSettings);
   }
 
   parseBudgetRules(input: ParseBudgetRulesInput): Promise<BudgetRulePreview> {

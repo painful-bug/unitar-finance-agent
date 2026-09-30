@@ -145,7 +145,7 @@ class ContextManager:
         self,
         jev: JevJudge | None = None,
         *,
-        trigger_tokens: int | None = None,
+        trigger_tokens: int | None = 8_000,
         preserve_recent: int = 6,
         keep_threshold: float = 0.5,
         min_reduction: float = 0.05,

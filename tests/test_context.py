@@ -118,6 +118,20 @@ def test_turn_threshold_compacts_from_the_fifth_user_message_without_mutating_hi
     assert later_report.strategy == "jev"
 
 
+def test_default_token_threshold_compacts_before_the_turn_threshold() -> None:
+    session = make_turn_session(1)
+    session.messages[-2]["content"] = "x" * 32_000
+
+    compacted, report = ContextManager(DropAllJev(), preserve_recent=1).prepare(
+        {"role": "system", "content": "system"}, session, SummaryProvider(), mode="jev"
+    )
+
+    assert report.strategy == "jev"
+    assert report.before_tokens >= 8_000
+    assert report.after_tokens < report.before_tokens
+    assert session.messages[-2]["content"] == "x" * 32_000
+
+
 def test_turn_threshold_uses_summary_when_jev_fails() -> None:
     session = make_turn_session(5)
     manager = ContextManager(FakeJev(error=RuntimeError("Jev unavailable")))

@@ -13,6 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.4,<9"]
+eval = ["openai==2.54.0", "instructor==1.16.0"]
 
 [project.scripts]
 finance-mcp = "finance_agent.server:main"

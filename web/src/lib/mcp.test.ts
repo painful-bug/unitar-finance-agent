@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { FinanceMcpClient, parseTraceEnvelope, type McpAdapter } from "./mcp";
 
 const TOOLS = [
+  { name: "get_app_settings" },
+  { name: "update_app_settings" },
   { name: "parse_budget_rules" },
   { name: "create_finance_session" },
   { name: "ask_finance_agent" },
@@ -166,4 +168,15 @@ describe("FinanceMcpClient", () => {
     });
     expect(recovered.callTool).toHaveBeenCalledTimes(1);
   });
+});
+
+it("validates shared settings and sends partial updates", async () => {
+  const settings = { version: 1, rules_text: "Save 20%", rules_draft: "Save 20%", evaluation_judge: "auto", budget_rules: [{ rule_id: "savings", source_text: "Save 20%" }], context_mode: "auto", compaction_turns: 15, max_agent_steps: 15 };
+  const adapter = fakeAdapter({ structuredContent: settings });
+  const client = new FinanceMcpClient(() => adapter);
+  await expect(client.getAppSettings()).resolves.toEqual(settings);
+  await client.updateAppSettings({ max_agent_steps: 25 });
+  expect(adapter.callTool).toHaveBeenLastCalledWith("update_app_settings", { max_agent_steps: 25 }, undefined);
+  vi.mocked(adapter.callTool).mockResolvedValue({ structuredContent: { ...settings, compaction_turns: 4 } });
+  await expect(client.getAppSettings()).rejects.toThrow("invalid structured content");
 });

@@ -10,8 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .budget import BudgetResult, BudgetRule, Operand, default_budget_rules
 
-MAX_CSV_BYTES = 1_000_000
-MAX_CSV_ROWS = 5_000
+MAX_CSV_BYTES = 10_000_000
+MAX_CSV_ROWS = 50_000
 MONEY = Decimal("0.01")
 
 
@@ -59,7 +59,7 @@ def _month_bounds(month: str) -> tuple[int, int]:
 
 def load_csv(csv_text: str) -> list[Transaction]:
     if len(csv_text.encode("utf-8")) > MAX_CSV_BYTES:
-        raise ValueError("CSV exceeds 1 MB")
+        raise ValueError("CSV exceeds 10 MB")
 
     reader = csv.DictReader(io.StringIO(csv_text))
     required = {"date", "kind", "category", "amount"}
@@ -224,6 +224,13 @@ class FinanceData:
             )
 
         assert rule.left and rule.operator and rule.right
+        missing = next((operand.category for operand in (rule.left, rule.right)
+                        if operand.category and not any(item.category.casefold() == operand.category.casefold() for item in self.transactions)), None)
+        if missing:
+            return BudgetResult(rule_id=rule.rule_id, source_text=rule.source_text, month=month,
+                                status="insufficient_evidence", compliant=None, observed=None,
+                                limit=None, unit=rule.left.unit, operator=rule.operator,
+                                reason=f"the ledger does not contain category: {missing}")
         observed, left_evidence = self._resolve_operand(rule.left, month)
         limit, right_evidence = self._resolve_operand(rule.right, month)
         if observed is None or limit is None:
