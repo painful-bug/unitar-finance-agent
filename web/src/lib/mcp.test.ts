@@ -171,7 +171,7 @@ describe("FinanceMcpClient", () => {
 });
 
 it("validates shared settings and sends partial updates", async () => {
-  const settings = { version: 1, rules_text: "Save 20%", rules_draft: "Save 20%", evaluation_judge: "auto", budget_rules: [{ rule_id: "savings", source_text: "Save 20%" }], context_mode: "auto", compaction_turns: 15, max_agent_steps: 15 };
+  const settings = { version: 1, rules_text: "Save 20%", rules_draft: "Save 20%", budget_rules: [{ rule_id: "savings", source_text: "Save 20%" }], context_mode: "auto", compaction_turns: 15, max_agent_steps: 15 };
   const adapter = fakeAdapter({ structuredContent: settings });
   const client = new FinanceMcpClient(() => adapter);
   await expect(client.getAppSettings()).resolves.toEqual(settings);

@@ -209,9 +209,7 @@ def test_mcp_shared_settings_contract_and_ledger_mutation(tmp_path):
         async with Client(build_server(store)) as client:
             settings = await client.call_tool("get_app_settings", {})
             assert settings.structured_content["max_agent_steps"] == 15
-            assert settings.structured_content["evaluation_judge"] == "auto"
-            judged = await client.call_tool("update_app_settings", {"evaluation_judge": "jev"})
-            assert judged.structured_content["evaluation_judge"] == "jev"
+            assert "evaluation_judge" not in settings.structured_content
             invalid = await client.call_tool("update_app_settings", {"max_agent_steps": "20"})
             assert invalid.is_error
             updated = await client.call_tool("update_app_settings", {"compaction_turns": 20, "max_agent_steps": 25})

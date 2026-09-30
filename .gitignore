@@ -9,3 +9,6 @@ web/dist/
 web/coverage/
 web/playwright-report/
 web/test-results/
+output/
+evals/results/*/
+evals/results/*.json

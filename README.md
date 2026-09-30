@@ -10,7 +10,7 @@ A framework-free personal finance assistant that answers from a validated ledger
 - Canonical session history with runtime-selectable `auto`, `jev`, and `summary` context modes.
 - Eight typed MCP tools covering finance sessions, budget-rule parsing, and persistent chat-thread lifecycle.
 - Bundled deterministic RM data plus per-chat CSV uploads stored with the local thread.
-- Twelve golden evaluation cases using the instructor notebook method, with independent LLM and Jev judges.
+- Twelve golden evaluation cases using the instructor notebook method, comparing two finance prompts with keyword checks and an LLM judge.
 
 No agent framework, database, authentication, cloud sync, or general financial advice is included.
 
@@ -118,12 +118,12 @@ The top-right theme control follows the operating-system theme on first use, the
 ## Tests and evaluation
 
 ```bash
-uv run pytest
-uv run --extra eval --env-file .env python tools/run_evaluation.py --judge both
-uv run --extra eval --env-file .env python tools/run_evaluation.py --judge both --repeats 3
+uv run --extra dev --extra eval pytest
+uv run --extra eval --env-file .env python tools/run_evaluation.py
+uv run --extra eval --env-file .env python tools/run_evaluation.py --repeats 1
 ```
 
-Each evaluation creates a new directory under `evals/results/` with `report.md`, `results.json`, a readable `transcript.txt`, and frozen source/fixture snapshots. It runs actual `v0.1-baseline` code and the latest workspace code, then grades the same answers separately with the selected judges. Settings → Evaluation chooses `auto`, `jev`, or `llm`; `--judge` overrides it. See [the evaluation operating guide](docs/evaluation-guide.md) for setup, live-demo commands, resume behavior, and interpretation.
+Each evaluation compares two direct finance prompts over three fresh repetitions, using twelve questions with keyword OR LLM-judge checks. It prints questions, answers, verdicts, and reasoning, then saves `report.md` and `results.json` in a new timestamped directory under `evals/results/`. The report includes per-run and aggregate rates plus the observed range. Use `--repeats 1` for a shorter live demo. Only `GROQ_API_KEY` is required; evaluation is independent of app Settings and Jev. See [the evaluation operating guide](docs/evaluation-guide.md) and [the verified evaluation report](docs/evaluation-report.md).
 
 CI runs the Python suite and package build, frontend lint/typecheck/unit/build checks, Playwright against a deterministic MCP fixture, and both container builds. It does not publish images or require provider credentials.
 

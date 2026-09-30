@@ -513,7 +513,6 @@ def build_server(store: SessionStore | None = None) -> MCPServer:
         rules_text: str | None = None,
         budget_rules: list[BudgetRule] | None = None,
         context_mode: ContextMode | None = None,
-        evaluation_judge: Literal["auto", "jev", "llm"] | None = None,
         compaction_turns: OptionalCompactionTurns = None,
         max_agent_steps: OptionalAgentSteps = None,
         reset_rules: bool = False,
@@ -521,7 +520,7 @@ def build_server(store: SessionStore | None = None) -> MCPServer:
         """Save shared configuration. Running answers retain their starting settings."""
         try:
             return sessions.update_app_settings(rules_draft=rules_draft, rules_text=rules_text,
-                                               budget_rules=budget_rules, context_mode=context_mode, evaluation_judge=evaluation_judge,
+                                               budget_rules=budget_rules, context_mode=context_mode,
                                                compaction_turns=compaction_turns, max_agent_steps=max_agent_steps, reset_rules=reset_rules)
         except ValueError as exc:
             raise ToolError(str(exc)) from exc

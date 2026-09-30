@@ -8,7 +8,7 @@ import pytest
 from finance_agent.agent import AssistantTurn, ToolCall
 from finance_agent.context import ContextManager
 from finance_agent.server import SessionStore
-from finance_agent.threads import ChatStore, ChatTurn, chat_title, utc_now
+from finance_agent.threads import AppSettings, ChatStore, ChatTurn, chat_title, utc_now
 
 
 class ThreadProvider:
@@ -37,6 +37,29 @@ def run(value):
 def test_chat_title_is_deterministic_and_bounded() -> None:
     assert chat_title("  How   much did I save?\n") == "How much did I save?"
     assert chat_title("x" * 60) == f"{'x' * 47}…"
+
+
+def test_retired_evaluation_setting_loads_in_settings_and_chat_snapshots(tmp_path):
+    store = ChatStore(tmp_path / "chats")
+    store.save_settings(AppSettings())
+    path = store.path / "settings/app.json"
+    saved = json.loads(path.read_text())
+    saved.update(evaluation_judge="jev", compaction_turns=20)
+    path.write_text(json.dumps(saved))
+    assert store.load_settings().compaction_turns == 20
+    assert "evaluation_judge" not in store.load_settings().model_dump()
+    sessions = SessionStore(provider=ThreadProvider(), chat_store=store)
+    created = sessions.create()
+    run(sessions.ask(created.session_id, "How much did I save?"))
+    path = store.path / f"{created.session_id}.json"
+    saved = json.loads(path.read_text())
+    saved["turns"][0]["settings"]["evaluation_judge"] = "auto"
+    path.write_text(json.dumps(saved))
+    restored = store.load(created.session_id)
+    assert restored.turns[0].question == "How much did I save?"
+    assert "evaluation_judge" not in restored.turns[0].settings.model_dump()
+    with pytest.raises(ValueError):
+        AppSettings.model_validate({"unrelated_unknown_setting": True})
 
 
 def test_store_permissions_validation_and_corrupt_file_isolation(tmp_path: Path) -> None:

@@ -284,6 +284,6 @@ type UpdateAppSettingsInput = Partial<Omit<AppSettings, "version">> & { reset_ru
 
 `update_chat_thread` additionally accepts `csv_text?: string`, `upload_name?: string`, and `use_bundled_data?: boolean`. CSV and bundled-reset inputs are mutually exclusive. Success preserves earlier turns, records the ledger-change boundary, updates automatic dates/counts, and clears canonical model messages. A failed validation/save retains the prior ledger. No raw CSV is returned publicly.
 
-## Evaluation judge setting
+## Evaluation is independent of Settings
 
-`get_app_settings` now returns `evaluation_judge: "auto" | "jev" | "llm"` (default `"auto"`). `update_app_settings` accepts the same optional field and persists it atomically. Old saved settings receive the default during validation. Restart the backend after upgrading so its MCP schema includes this field. This setting is consumed only by the evaluation script; it does not trigger grading of chat replies. The script reads running MCP settings first, with a persisted-host fallback when the default backend is unavailable; an explicit unavailable `--mcp-url` fails. CLI `--judge` takes precedence.
+The prompt evaluation script uses a normal LLM judge and no longer exposes an `evaluation_judge` setting in `get_app_settings` or `update_app_settings`. Existing saved app settings and per-turn chat snapshots silently discard this retired field during validation; other unknown fields remain rejected. Restart the backend after upgrading to refresh its MCP schema. Context strategy settings, including Jev, remain available for ordinary conversations. See [the evaluation guide](../evaluation-guide.md).

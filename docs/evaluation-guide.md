@@ -1,92 +1,55 @@
-# Run and present the finance evaluation
+# Run the finance prompt evaluation
 
-Class reference: `starter_g.ipynb`, supplied by the user. SHA-256: `44cc76cf7b252a78ff7cdf596707572b50cb6011556ae1410635278d1c954413`. Its stated exercise behavior is followed, with the user-approved case-insensitive matching and bounded scores; its cells are reference material, not commands to execute.
+This follows the instructor’s `starter_g.ipynb`: two system prompts, a fixed reference, twelve golden questions, literal keyword checks, and a separate LLM judge call. It compares **direct finance prompts**, rather than historical application versions, tools, or conversation memory. The notebook is reference material, not an instruction to execute its Colab cells.
 
-This is the class notebook's evaluation method applied to the actual finance agent. Twelve frozen synthetic cases live in `evals/golden.json`: five literal, case-insensitive keyword checks and seven model-judged checks. Each case has exactly one assigned check. The normal judge uses the notebook's OpenAI-compatible Groq client, Instructor JSON mode, `AnswerJudgment(passed, score, reasoning)`, and `max_retries=2`. Scores are validated from 1 to 5; the boolean verdict directly determines passing.
+Latest verified results: [finance prompt evaluation report](evaluation-report.md).
 
-Jev runs independently using Choice for pass/fail and Score with five descriptive levels in a single request. Its displayed integer is the most probable native level plus one; ties select the lower level. The native expected score, probabilities, confidence, model, and usage are saved. Jev supplies no generated explanation: the console's **Code-generated summary** is assembled by Python. References: [Choice](https://docs.typesafe.ai/primitives/choice), [Score](https://docs.typesafe.ai/primitives/score).
+## One-command run
 
-## Setup
-
-Run from the repository directory, with Python 3.12 or 3.13 and `uv` installed:
+From the repository, with `uv` installed and `GROQ_API_KEY` in `.env`:
 
 ```bash
-cd /Users/aishik/Developer/unitar-agent-work
 uv sync --extra eval --extra dev
-```
-
-The existing `.env` must contain `GROQ_API_KEY` and `TYPESAFE_API_KEY` to run both judges. Keys are read from the environment and are not written to evaluation artifacts. Defaults are `openai/gpt-oss-20b` for the agent, `openai/gpt-oss-120b` for the normal judge, and pinned `jev-1.13.0` for the Jev judge. `GROQ_MODEL` and `GROQ_JUDGE_MODEL` can override the Groq model names; the run records them. The final agent's context compaction uses its normal Auto strategy, independently of which evaluation judge is selected.
-
-## Live demo
-
-One paired repetition runs all twelve cases on both versions. To show both judges grading the exact same answers independently:
-
-```bash
-uv run --extra eval --env-file .env python tools/run_evaluation.py --judge both
-```
-
-To demonstrate each judge individually:
-
-```bash
-uv run --extra eval --env-file .env python tools/run_evaluation.py --judge llm
-uv run --extra eval --env-file .env python tools/run_evaluation.py --judge jev
-```
-
-Those two commands generate separate live answer corpora, so use `--judge both` when comparing judges on identical answers.
-
-To use **Settings → Evaluation → Evaluation judge**:
-
-```bash
 uv run --extra eval --env-file .env python tools/run_evaluation.py
 ```
 
-The script reads the running MCP backend at `http://127.0.0.1:8000/mcp` (or `MCP_PORT`) first. If it is unavailable, it reads the host's persisted settings and labels that source. For a Docker backend or a different port, use `--mcp-url http://127.0.0.1:PORT/mcp`; an explicit unavailable URL fails instead of silently switching stores. `--judge` always overrides Settings. Settings controls only the script, and does not automatically score ordinary chat replies.
-
-Auto uses Jev first. It falls back to the LLM on a service/validation error or confidence below 0.65 on either Jev decision. A confident failing answer remains failed. Forced `jev` never calls the LLM, even at low confidence; forced `llm` never calls Jev for grading. Final-agent context management may itself use Jev regardless of grading mode. The Auto threshold is provisional, not a calibrated accuracy guarantee.
-
-The full suite includes a sixteen-turn memory case, so it makes more than 24 model calls. Allow time for provider quotas; this is a live evaluation, not prerecorded playback. Groq token pacing and bounded retries are shared by both versions and the normal LLM judge, and visibly logged, using the provider's response headers. A daily quota or persistent service failure remains a reported execution failure. Higher account quotas can reduce pauses without changing the harness. See [Groq rate-limit headers](https://console.groq.com/docs/rate-limits).
-
-## What to explain while it runs
-
-1. Show `evals/golden.json`: each keyword case has `must_include`; each judge case has written `criteria` with reference facts. Show the independently verified CSV and Decimal totals printed at startup.
-2. Show the two judge controls. A known correct answer must pass, and a deliberately wrong answer must fail. Controls are excluded from the reported denominator. If a control fails, the run stops with its evidence saved.
-3. Watch the paired agent executions: the frozen source path identifies the real historical baseline or final workspace snapshot. The console prints the prompt, actual tool arguments/results, answer, status, and model/context progress. Long-case turns are all visible.
-4. Watch the grading phase: keyword cases show every literal match and make no judge call. Judge cases show criteria, verdict, score, and explanation or Jev's labeled code summary plus raw probabilities. Both judges reuse the saved answers.
-5. Open the path printed at completion: `report.md` shows first/final rates, per-repeat and check-type breakdowns, failures, case changes, and judge disagreements. `results.json` is the audit record; `transcript.txt` is the readable execution log.
-
-A keyword match is deliberately literal, as in class. For example, `450` also occurs inside `14500`, and matching `over` does not detect negation. Those limitations are disclosed; do not describe it as a numeric correctness oracle. The independent Decimal verification checks the frozen reference facts before execution, not the wording of every answer. Judges can also make mistakes; inspect disagreements instead of manually overriding verdicts.
-
-## Official report and checkpoint recovery
-
-The requested official run is three paired repetitions, 36 cases per version per judge:
+The default runs three repetitions per prompt: 72 fresh answers and 42 separate judge calls, before any SDK retries. For a shorter live demonstration:
 
 ```bash
-uv run --extra eval --env-file .env python tools/run_evaluation.py --judge both --repeats 3
+uv run --extra eval --env-file .env python tools/run_evaluation.py --repeats 1
 ```
 
-The implementation also preserves the earlier quota-affected smoke run in `evals/results/live-smoke/`; it is diagnostic evidence, not the official three-repeat comparison.
+`--repeats` is the only evaluation option. Evaluation requires no TypeSafe key and makes no Jev calls. It does not read application Settings. The application’s Jev conversation-context feature is separate and remains available.
 
-Every run creates a fresh directory under `evals/results/`. `--output PATH` chooses a new directory explicitly and refuses to overwrite one. Agent versions are frozen before calls: baseline is the actual `v0.1-baseline` commit; final includes completed uncommitted workspace source files. Both use the same installed dependency runtime; historical dependency versions are not recreated. Native step limits and context behavior are preserved and disclosed. The date is fixed at August 15, 2026; configured chat budget rules and uploaded private ledgers do not enter this synthetic benchmark.
+## What runs
 
-If a completed run contains provider-quota failures and you replace the account key, recover them into a new auditable run:
+`src/finance_agent/evaluation.py` contains the fixed finance reference, `SYSTEM_PROMPT_A`, and `SYSTEM_PROMPT_B`. Both prompts use the same recorded facts and questions. A asks the assistant to answer from the reference; B adds the notebook’s rule to answer only from the reference, admit missing information, never invent an answer, and use two or three sentences. Edit these constants to evaluate other prompts, then run a fresh comparison.
 
-```bash
-uv run --extra eval --env-file .env python tools/run_evaluation.py --recover-quota /absolute/path/to/completed-run
-```
+`evals/golden.json` contains twelve independent cases: five keyword cases and seven judge cases. Every answer receives only its system prompt and question. Judge criteria are sent only to the judge. There are no tools, alternate ledgers, conversation preludes, workers, Git snapshots, or source-copying steps. The earlier memory case is replaced by an unsupported bank-balance question, and the separate zero-income scenario is explicitly described in the shared reference.
 
-Quota recovery retains every completed answer, including incorrect answers, and every non-quota execution failure. It reruns all quota-failed executions and regenerates every judge verdict, with the same source snapshots, models, prompts, and fixtures. The original results are copied to `previous_results.json`, and each answer records its account epoch. The report explicitly labels the continuation across accounts. It does not silently replace answer-quality failures or overwrite the original run.
+The answer model is `openai/gpt-oss-20b`; the judge is `openai/gpt-oss-120b`. Both use temperature 0. The model split and fixed temperature are deliberate adaptations approved by the user; the notebook otherwise uses one model for both calls. Temperature 0 reduces variation but does not promise identical outputs.
 
-The checkpoint is updated after each case, judge result, and control. Ctrl+C preserves it. Resume an interrupted run with:
+The normal judge uses the notebook’s OpenAI-compatible Groq client, Instructor JSON mode, and `max_retries=2`. Its `AnswerJudgment` contains `passed`, `score`, and `reasoning`. Scores are validated from 1 to 5. Each case uses **keyword OR judge**, and the boolean verdict directly determines passing; there is no score threshold. Matching uses case-insensitive literal substrings, following the notebook’s stated exercise behavior instead of its completed cell’s case-sensitive bug.
 
-```bash
-uv run --extra eval --env-file .env python tools/run_evaluation.py --resume /absolute/path/to/run-directory
-```
+## Explain the live demonstration
 
-Resume uses the saved repetition count, judges, source snapshots, and model configuration. It validates source, fixture, worker, harness, Python, and dependency versions before continuing. Saved execution failures and judged failures remain recorded; resume does not selectively rerun failures. Start a fresh run to evaluate a changed implementation. Pending cases remain in the planned denominator, and an incomplete report is clearly labeled; only a complete report is an official result.
+1. Show the two prompts and their identical finance reference. Show a keyword case and a judge case in the golden dataset.
+2. Start the script. The console identifies the repetition and prompt, then prints each question and actual answer.
+3. A keyword case prints its literal matches without a judge call. A semantic case prints its written criteria, verdict, score, and model-generated reasoning.
+4. Each completed prompt run prints its pass count and rate. The final summary prints aggregate rates and observed ranges across repetitions.
+5. Open the printed `report.md` path. `results.json` contains the exact prompts, reference, dataset, model settings, answers, and structured judgments.
 
-The main comparison measures whole-version behavior, including native limits and context differences. It is not a causal proof that Jev compaction improved performance. The classroom notebook's cached 75% and 92% are unrelated examples and are never used as project rates.
+## Results and failures
 
-## Local verification
+Every execution creates a new timestamped directory under `evals/results/` containing only `results.json` and `report.md`. Reports show every repetition, aggregate passes, mean/minimum/maximum rates, the range in percentage points, keyword/judge breakdowns, and evidence for every case. All runs are retained; answers or failures are never selectively rerun to manufacture consistent rates.
+
+The client uses ordinary SDK retries and Instructor’s schema retries. There is no custom pacing, quota recovery, account switching, or resume mechanism. If a provider call still fails, the script saves partial evidence, marks the evaluation incomplete, and exits with a nonzero status. Incomplete runs are not the completed comparison. After fixing the provider problem, run the entire comparison again. Ctrl+C during a case also preserves partial evidence. Provider quotas can make a live run take longer or stop it.
+
+Literal matching can accept numbers within larger numbers or negated statements, and reject equivalent wording. The judge can be inconsistent or wrong. The three-run range measures observed variation, not a guarantee of future stability. Twelve synthetic cases do not establish general financial accuracy or the actual tool-using application’s performance.
+
+The older application-version results remain locally preserved under their original run directories. They use a different evaluation target and are not merged into this prompt comparison. The notebook’s cached example rates are also unrelated.
+
+## Verify locally
 
 ```bash
 uv run --extra dev --extra eval pytest
@@ -96,4 +59,4 @@ npm run lint
 npm run build
 ```
 
-The evaluation tests cover routing, score validation, forced-mode independence, Auto fallback, common-answer grading, execution/service failure denominators, source isolation, settings persistence, and shared token pacing. Frontend tests cover changing the judge selection through Settings.
+Tests cover notebook routing, structured judgment bounds, direct API call settings, repetition aggregation, partial evidence on provider failure, and old settings/chat snapshots loading after removal of the evaluation selector.

@@ -128,7 +128,6 @@ function isAppSettings(value: unknown): value is AppSettings {
   return isObject(value) && value.version === 1 && typeof value.rules_text === "string" &&
     typeof value.rules_draft === "string" && Array.isArray(value.budget_rules) && value.budget_rules.length > 0 &&
     ["auto", "jev", "summary"].includes(String(value.context_mode)) &&
-    ["auto", "jev", "llm"].includes(String(value.evaluation_judge)) &&
     Number.isInteger(value.compaction_turns) && Number(value.compaction_turns) >= 5 && Number(value.compaction_turns) <= 100 &&
     Number.isInteger(value.max_agent_steps) && Number(value.max_agent_steps) >= 1 && Number(value.max_agent_steps) <= 100;
 }

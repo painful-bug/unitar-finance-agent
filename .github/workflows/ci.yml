@@ -17,8 +17,8 @@ jobs:
           version: "0.12.1"
           enable-cache: true
           python-version: "3.12"
-      - run: uv sync --frozen --extra dev
-      - run: uv run pytest
+      - run: uv sync --frozen --extra dev --extra eval
+      - run: uv run --extra dev --extra eval pytest
       - run: uv build
 
   frontend:

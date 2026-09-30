@@ -63,7 +63,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
       <h1 ref={title} tabIndex={-1} id="settings-title">Make it work your way.</h1>
       <p className="settings-intro">One set of preferences for every conversation. Changes apply to the next answer.</p>
       <nav className="settings-section-nav" aria-label="Settings sections">
-        <a href="#budget-settings">Budget rules</a><a href="#context-settings">Context</a><a href="#execution-settings">Agent execution</a><a href="#evaluation-settings">Evaluation</a>
+        <a href="#budget-settings">Budget rules</a><a href="#context-settings">Context</a><a href="#execution-settings">Agent execution</a>
       </nav>
     </header>
     <div className="settings-page-body">
@@ -96,10 +96,6 @@ export function SettingsPanel(props: SettingsPanelProps) {
             <div className="settings-card-heading"><span className="settings-card-icon" aria-hidden="true">↗</span><div><h2>Agent execution</h2><p>Set room for reasoning and tools.</p></div></div>
             <NumericSetting key={`steps-${settings.max_agent_steps}`} id="max-agent-steps" label="Max agent steps" value={settings.max_agent_steps} min={1} max={100} onSave={(value) => props.onSave({ max_agent_steps: value })} />
             <p className="field-help">Each answer can take up to this many model-and-tool steps. An answer already running keeps its original limit.</p>
-          </section>
-          <section id="evaluation-settings" className="settings-card">
-            <div className="settings-card-heading"><span className="settings-card-icon" aria-hidden="true">✓</span><div><h2>Evaluation</h2><p>Choose the judge for the evaluation script.</p></div></div>
-            <div className="field-stack"><label htmlFor="evaluation-judge">Evaluation judge</label><select id="evaluation-judge" value={settings.evaluation_judge} onChange={(event) => props.onSave({ evaluation_judge: event.target.value as AppSettings["evaluation_judge"] })}><option value="auto">Auto</option><option value="jev">Jev</option><option value="llm">LLM</option></select><p className="field-help">Auto tries Jev, then uses the LLM if Jev fails or is uncertain. Run the Python script to evaluate.</p></div>
           </section>
           <div className="settings-footnote"><span aria-hidden="true">↻</span><p>Saved on this agent, shared across chats, and remembered after a restart.</p></div>
         </div>

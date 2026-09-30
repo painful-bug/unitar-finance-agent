@@ -44,7 +44,6 @@ export interface AppSettings {
   rules_draft: string;
   budget_rules: BudgetRule[];
   context_mode: ContextMode;
-  evaluation_judge: "auto" | "jev" | "llm";
   compaction_turns: number;
   max_agent_steps: number;
 }

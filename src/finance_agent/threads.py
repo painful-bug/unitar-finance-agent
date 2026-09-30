@@ -23,9 +23,16 @@ class AppSettings(BaseModel):
     rules_draft: str = Field(default_factory=lambda: "\n".join(rule.source_text for rule in default_budget_rules()), max_length=10_000)
     budget_rules: list[BudgetRule] = Field(default_factory=default_budget_rules, min_length=1, max_length=50)
     context_mode: ContextMode = "auto"
-    evaluation_judge: Literal["auto", "jev", "llm"] = "auto"
     compaction_turns: int = Field(default=15, strict=True, ge=5, le=100)
     max_agent_steps: int = Field(default=15, strict=True, ge=1, le=100)
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_evaluation_setting(cls, value):
+        # Old app settings and inherited TurnSettings snapshots contain this retired field.
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if key != "evaluation_judge"}
+        return value
 
     @field_validator("budget_rules")
     @classmethod

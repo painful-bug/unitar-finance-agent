@@ -137,10 +137,9 @@ The following are Groq function tools executed inside the agent and are not MCP 
 |---|---|---|
 | Groq agent model | `GROQ_MODEL`, default `openai/gpt-oss-20b` | [`src/finance_agent/agent.py:93-117`](../../src/finance_agent/agent.py#L93-L117) |
 | Groq summary model | Optional `GROQ_SUMMARY_MODEL`, otherwise reuse the agent provider | [`src/finance_agent/context.py:251-267`](../../src/finance_agent/context.py#L251-L267) |
-| Groq evaluation judge | `GROQ_JUDGE_MODEL`, default `openai/gpt-oss-120b` | [`src/finance_agent/evaluation.py:63-73`](../../src/finance_agent/evaluation.py#L63-L73) |
+| Groq evaluation judge | Fixed `openai/gpt-oss-120b`; answers use fixed `openai/gpt-oss-20b` | [`src/finance_agent/evaluation.py:63-73`](../../src/finance_agent/evaluation.py#L63-L73) |
 | Groq credential | `GROQ_API_KEY` | [`src/finance_agent/agent.py:96`](../../src/finance_agent/agent.py#L96), [`.env.example:1`](../../.env.example#L1) |
 | TypeSafe/Jev | `TYPESAFE_API_KEY`, `TYPESAFE_MODEL`, ten-second client timeout | [`src/finance_agent/jev.py:10-29`](../../src/finance_agent/jev.py#L10-L29), [`.env.example:2-6`](../../.env.example#L2-L6) |
-| Evaluation trigger | `EVAL_CONTEXT_TRIGGER_TOKENS`, default `1500` | [`src/finance_agent/evaluation.py:71-73`](../../src/finance_agent/evaluation.py#L71-L73) |
 | MCP bind | `MCP_HOST`, `MCP_PORT` | [`src/finance_agent/server.py:177-184`](../../src/finance_agent/server.py#L177-L184) |
 | Streamlit MCP target | `MCP_URL` | [`src/finance_agent/ui.py:35-37`](../../src/finance_agent/ui.py#L35-L37) |
 | Streamlit bind | `UI_HOST`, `UI_PORT` | [`src/finance_agent/ui.py:497-513`](../../src/finance_agent/ui.py#L497-L513) |
@@ -170,7 +169,7 @@ The current direct dependencies are Groq, MCP, Pydantic, Streamlit, and TypeSafe
 | Jev | Generic decisions, Noul extraction, missing-answer validation | [`tests/test_jev.py`](../../tests/test_jev.py) |
 | MCP | Exact tools, structured outputs, lifecycle, custom-rule confirmation | [`tests/test_server.py`](../../tests/test_server.py) |
 | Streamlit UI | Rule persistence, navigation, stale-server error, context rendering, live-context reruns | [`tests/test_ui.py`](../../tests/test_ui.py) |
-| Evaluation | Twelve-case notebook-style golden set with literal checks and independent LLM/Jev judges | [`tests/test_evaluation.py`](../../tests/test_evaluation.py), [`evals/golden.json`](../../evals/golden.json) |
+| Evaluation | Twelve-case direct prompt A/B comparison with literal checks, an LLM judge, and repeated-run stability reporting | [`tests/test_evaluation.py`](../../tests/test_evaluation.py), [`evals/golden.json`](../../evals/golden.json) |
 
 The existing suite contains 30 tests and passed before this plan was written. Live-provider evaluation still requires real credentials because the runner rejects execution without `GROQ_API_KEY` ([`src/finance_agent/evaluation.py:63-65`](../../src/finance_agent/evaluation.py#L63-L65)).
 
