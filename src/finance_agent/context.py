@@ -144,7 +144,7 @@ class ContextManager:
         self,
         jev: JevJudge | None = None,
         *,
-        trigger_tokens: int = 8_000,
+        trigger_tokens: int | None = None,
         preserve_recent: int = 6,
         keep_threshold: float = 0.5,
         min_reduction: float = 0.05,
@@ -165,7 +165,9 @@ class ContextManager:
     ) -> tuple[list[dict[str, Any]], ContextReport]:
         full = [system, *session.messages]
         before = estimate_tokens(full)
-        if before < self.trigger_tokens:
+        turn_due = sum(message.get("role") == "user" for message in session.messages) >= session.compaction_turns
+        token_due = self.trigger_tokens is not None and before >= self.trigger_tokens
+        if not turn_due and not token_due:
             return full, ContextReport(
                 before_tokens=before,
                 after_tokens=before,

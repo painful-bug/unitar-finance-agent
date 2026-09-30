@@ -46,4 +46,5 @@ class Session:
     data: FinanceData
     as_of_date: date
     context_mode: Literal["auto", "jev", "summary"] = "auto"
+    compaction_turns: int = 15
     messages: list[dict[str, Any]] = field(default_factory=list)

@@ -1,22 +1,22 @@
 # Personal Finance Agent Beta
 
-A framework-free personal finance assistant that answers from a validated ledger through a hand-written tool loop. Groq supplies the chat model, Jev selects old tool context, Groq summarization is the fallback, the agent is exposed over MCP, and Streamlit is only an MCP client.
+A framework-free personal finance assistant that answers from a validated ledger through a hand-written tool loop. Groq supplies the chat model, Jev selects old tool context, Groq summarization is the fallback, the agent is exposed over MCP, and a React UI connects through a same-origin proxy.
 
 ## What is included
 
 - Three Pydantic-validated finance tools: transaction lookup, deterministic budget checking, and savings-rate calculation.
 - Session-scoped natural-language budget rules compiled into a safe expression schema.
 - A six-step manual reason → act → observe loop with recoverable malformed tool calls.
-- Canonical in-memory session history with runtime-selectable `auto`, `jev`, and `summary` context modes.
-- MCP tools for creating, asking, and closing finance sessions.
-- Bundled deterministic RM data plus per-session CSV uploads.
+- Canonical session history with runtime-selectable `auto`, `jev`, and `summary` context modes.
+- Eight typed MCP tools covering finance sessions, budget-rule parsing, and persistent chat-thread lifecycle.
+- Bundled deterministic RM data plus per-chat CSV uploads stored with the local thread.
 - Ten golden evaluation cases with literal checks and a separate structured LLM judge.
 
-No agent framework, database, authentication, persistent uploads, or general financial advice is included.
+No agent framework, database, authentication, cloud sync, or general financial advice is included.
 
 ## Setup
 
-Python 3.12 and [uv](https://docs.astral.sh/uv/) are required.
+Python 3.12, [uv](https://docs.astral.sh/uv/), and Node.js 24 are required for local development.
 
 ```bash
 cp .env.example .env
@@ -24,20 +24,46 @@ cp .env.example .env
 uv sync --extra dev
 ```
 
-Start the MCP server and UI in separate terminals:
+Start the MCP server:
 
 ```bash
 uv run --env-file .env finance-mcp
-uv run --env-file .env finance-ui
 ```
 
-Open [http://127.0.0.1:8501](http://127.0.0.1:8501). The MCP endpoint is `http://127.0.0.1:8000/mcp`.
+Then start the React development server in another terminal:
 
-Alternatively:
+```bash
+cd web
+npm ci
+MCP_UPSTREAM=http://127.0.0.1:8000/mcp npm run dev
+```
+
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The MCP endpoint is `http://127.0.0.1:8000/mcp`.
+
+Or start both development servers and open the UI in your default browser:
+
+```bash
+./dev.sh
+```
+
+Press `Ctrl+C` to stop both processes. Set `MCP_PORT` or `WEB_PORT` before running the script when the default ports are occupied.
+
+For the production-shaped two-container setup:
 
 ```bash
 docker compose --env-file .env up --build
 ```
+
+Open [http://127.0.0.1:8501](http://127.0.0.1:8501). Nginx serves the React app and proxies same-origin `/mcp` traffic to the independently runnable MCP container. Only the UI port and MCP port are bound to loopback.
+
+The images can also be built separately:
+
+```bash
+docker build -t finance-mcp .
+docker build -t finance-agent-ui ./web
+```
+
+Set `MCP_UPSTREAM` when running the UI image outside Compose. It must be an MCP URL reachable from that container; provider API keys belong only on the MCP process and are never included in the browser bundle.
 
 ## CSV format
 
@@ -49,7 +75,15 @@ date,kind,category,amount,merchant
 2026-07-03,expense,groceries,120.40,Market
 ```
 
-`kind` must be `income` or `expense`; amounts must be positive. Uploaded bytes and sessions remain in memory and disappear when the MCP process stops.
+`kind` must be `income` or `expense`; amounts must be positive. After the first message, the uploaded CSV is retained in that chat's owner-readable JSON record so the conversation can resume after an MCP restart.
+
+## Saved chats
+
+The sidebar lists saved chats newest first. A blank **New chat** is not written until its first message. At that point the server snapshots the ledger, as-of date, confirmed rules, canonical agent context, visible turns, tool traces, and context reports. The first prompt becomes the title; use the thread menu to rename or permanently delete it.
+
+Direct local runs store one validated JSON file per chat under `~/.finance-agent/chats/`. Set `FINANCE_CHAT_STORE_PATH` to use another directory. The directory is mode `0700`, files are mode `0600`, and writes use atomic replacement. These files are unencrypted and can contain uploaded financial data. Docker Compose stores them in the `finance_chat_data` named volume at `/data/chats`.
+
+Saved routes use `/chat/<thread-id>`, so refreshing or reopening a URL restores the transcript and rehydrates its finance session. Ledger, date, and confirmed rules stay fixed for that chat; context mode and compaction threshold remain editable.
 
 ## Context modes
 
@@ -59,15 +93,23 @@ date,kind,category,amount,merchant
 
 The canonical history is never overwritten, so a running session can switch modes. If both strategies fail, the request returns an error rather than sending uncontrolled context.
 
+The React product triggers compaction by user turn. The default is 15 turns, configurable from 5 to 100 in **Settings**. New-chat defaults are saved in browser `localStorage`; active-chat changes are stored in that chat's JSON record. From the threshold onward, every model request receives a freshly prepared compacted copy; evaluation code can still opt into the older token trigger explicitly.
+
 ## Natural-language budget rules
 
-Open **Settings** in the Streamlit test UI, edit the comma-separated built-in rules or add rules on new lines, and select **Parse rules**. Groq converts the text into a validated expression preview; confirm that preview before starting a session. The saved expression is evaluated with exact `Decimal` arithmetic over the ledger. Unsupported rules remain visible and return `insufficient_evidence` instead of a guessed result.
+Open **Settings** in a new chat, edit the comma-separated built-in rules or add rules on new lines, and select **Parse rules**. Groq converts the text into a validated expression preview; confirm that preview before sending the first message. The saved expression is evaluated with exact `Decimal` arithmetic over the ledger. Unsupported rules remain visible and return `insufficient_evidence` instead of a guessed result.
+
+React stores confirmed rules in browser `localStorage`. Rules previously saved in `~/.finance-agent/rules.json` are not imported; confirm them once after switching to React.
 
 For example, `Save at least 20% of monthly income` is stored as a comparison between savings and income multiplied by `0.20`. The actual income and target are resolved separately for every requested month.
 
-## Live context inspector
+## Context inspector and tool activity
 
-In **Settings**, enable **Show context live**. A color-coded context window appears below **Start new session** in the sidebar after the next answer. Switch between the canonical pre-compaction context and the exact model-facing context; double-click the window to enter or leave fullscreen. Tool calls are labeled with their keep, trim, or drop decision.
+Select **Context** in the chat header to open the inspector. Switch between canonical pre-compaction context and exact model input; compacted responses automatically select the model-input pane. The fullscreen button expands the panel, and tool calls retain their keep, trim, or drop decision.
+
+Assistant Markdown supports headings, lists, tables, links, blockquotes, and fenced code while raw HTML remains disabled. Finance tool traces render as readable transaction, savings, and budget modules; original arguments and results remain available under collapsed **Technical details** disclosures.
+
+The top-right theme control follows the operating-system theme on first use, then saves the explicit light or dark choice in the browser. Theme changes apply immediately without required motion.
 
 ## Tests and evaluation
 
@@ -78,5 +120,7 @@ uv run --env-file .env finance-eval --version final --context-mode auto
 ```
 
 Evaluation reports are written to `evals/results/v1.json` and `evals/results/final.json`. The runner refuses to create reports without a Groq key; pass rates must come from real runs, not placeholders.
+
+CI runs the Python suite and package build, frontend lint/typecheck/unit/build checks, Playwright against a deterministic MCP fixture, and both container builds. It does not publish images or require provider credentials.
 
 The application is a local single-user beta and is not financial advice.

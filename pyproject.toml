@@ -8,7 +8,6 @@ dependencies = [
   "groq>=0.31,<1",
   "mcp>=2,<3",
   "pydantic>=2.11,<3",
-  "streamlit>=1.64,<2",
   "typesafe-sdk>=0.1,<1",
 ]
 
@@ -17,7 +16,6 @@ dev = ["pytest>=8.4,<9"]
 
 [project.scripts]
 finance-mcp = "finance_agent.server:main"
-finance-ui = "finance_agent.ui:main"
 finance-eval = "finance_agent.evaluation:main"
 
 [build-system]

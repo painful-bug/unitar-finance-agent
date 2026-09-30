@@ -9,17 +9,20 @@ services:
       GROQ_SUMMARY_MODEL: ${GROQ_SUMMARY_MODEL:-openai/gpt-oss-20b}
       TYPESAFE_MODEL: ${TYPESAFE_MODEL:-jev-latest}
       MCP_HOST: 0.0.0.0
+      FINANCE_CHAT_STORE_PATH: /data/chats
+    volumes:
+      - finance_chat_data:/data/chats
     ports:
       - "127.0.0.1:8000:8000"
 
   ui:
-    build: .
-    command: finance-ui
+    build: ./web
     environment:
-      MCP_URL: http://mcp:8000/mcp
-      UI_HOST: 0.0.0.0
+      MCP_UPSTREAM: ${MCP_UPSTREAM:-http://mcp:8000/mcp}
     depends_on:
       - mcp
     ports:
-      - "127.0.0.1:8501:8501"
+      - "127.0.0.1:8501:80"
 
+volumes:
+  finance_chat_data:

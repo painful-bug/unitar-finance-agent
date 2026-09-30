@@ -8,7 +8,10 @@ from finance_agent.agent import AssistantTurn, ToolCall
 from finance_agent.budget import BudgetRule, Operand, default_budget_rules
 from finance_agent.context import ContextManager
 from finance_agent.server import SessionStore, build_server
-from finance_agent.ui import DEFAULT_RULES_TEXT
+from finance_agent.threads import ChatStore
+
+
+DEFAULT_RULES_TEXT = ", ".join(rule.source_text for rule in default_budget_rules())
 
 
 class FakeProvider:
@@ -32,11 +35,12 @@ class FakeProvider:
         return next(self.turns)
 
 
-def test_mcp_session_lifecycle_and_structured_results() -> None:
+def test_mcp_session_lifecycle_and_structured_results(tmp_path) -> None:
     async def scenario() -> None:
         store = SessionStore(
             provider=FakeProvider(),
             context_manager=ContextManager(trigger_tokens=100_000),
+            chat_store=ChatStore(tmp_path / "chats"),
         )
         server = build_server(store)
         async with Client(server) as client:
@@ -46,11 +50,17 @@ def test_mcp_session_lifecycle_and_structured_results() -> None:
                 "create_finance_session",
                 "ask_finance_agent",
                 "close_finance_session",
+                "list_chat_threads",
+                "get_chat_thread",
+                "update_chat_thread",
+                "delete_chat_thread",
             }
 
             created = await client.call_tool("create_finance_session", {})
             session_id = created.structured_content["session_id"]
             assert created.structured_content["transaction_count"] > 0
+            assert created.structured_content["compaction_turns"] == 15
+            assert created.structured_content["ledger_source"] == "demo"
 
             answered = await client.call_tool(
                 "ask_finance_agent",
@@ -67,8 +77,53 @@ def test_mcp_session_lifecycle_and_structured_results() -> None:
             assert context["before_messages"][0]["role"] == "system"
             assert context["after_messages"] == context["before_messages"]
 
+            listed = await client.call_tool("list_chat_threads", {})
+            assert listed.structured_content["threads"][0]["thread_id"] == session_id
+
+            renamed = await client.call_tool(
+                "update_chat_thread",
+                {"thread_id": session_id, "title": "July review", "compaction_turns": 20},
+            )
+            assert renamed.structured_content["summary"]["title"] == "July review"
+            assert renamed.structured_content["compaction_turns"] == 20
+
             closed = await client.call_tool("close_finance_session", {"session_id": session_id})
             assert closed.structured_content == {"session_id": session_id, "closed": True}
+
+            restored = await client.call_tool("get_chat_thread", {"thread_id": session_id})
+            assert restored.structured_content["turns"][0]["question"] == "July groceries?"
+
+            deleted = await client.call_tool("delete_chat_thread", {"thread_id": session_id})
+            assert deleted.structured_content == {"thread_id": session_id, "deleted": True}
+
+    asyncio.run(scenario())
+
+
+def test_mcp_compaction_turn_contract_is_bounded_and_configurable() -> None:
+    async def scenario() -> None:
+        server = build_server(SessionStore(provider=FakeProvider()))
+        async with Client(server) as client:
+            tools = await client.list_tools()
+            schemas = {tool.name: tool.input_schema for tool in tools.tools}
+            create_turns = schemas["create_finance_session"]["properties"]["compaction_turns"]
+            ask_turns = schemas["ask_finance_agent"]["properties"]["compaction_turns"]
+            assert create_turns["default"] == 15
+            assert create_turns["minimum"] == 5
+            assert create_turns["maximum"] == 100
+            ask_integer = next(item for item in ask_turns["anyOf"] if item.get("type") == "integer")
+            assert ask_integer["minimum"] == 5
+            assert ask_integer["maximum"] == 100
+
+            for invalid in (4, 101, 5.5, "5"):
+                rejected = await client.call_tool(
+                    "create_finance_session", {"compaction_turns": invalid}
+                )
+                assert rejected.is_error
+
+            created = await client.call_tool(
+                "create_finance_session", {"compaction_turns": 5}
+            )
+            assert created.structured_content["compaction_turns"] == 5
 
     asyncio.run(scenario())
 

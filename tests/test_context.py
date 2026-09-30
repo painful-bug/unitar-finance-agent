@@ -23,6 +23,11 @@ class SummaryProvider:
         return AssistantTurn(content="July groceries were RM120.40; the user asked to retain exact amounts.")
 
 
+class DropAllJev:
+    def noul_scores(self, state, questions):
+        return {name: 0.0 for name in questions}
+
+
 def make_session() -> Session:
     data = FinanceData(
         load_csv("date,kind,category,amount\n2026-07-01,expense,groceries,120.40"),
@@ -57,6 +62,77 @@ def make_session() -> Session:
         {"role": "user", "content": "Newest message"},
     ]
     return Session("test", data, date(2026, 8, 15), messages=messages)
+
+
+def make_turn_session(turns: int) -> Session:
+    session = make_session()
+    session.messages = []
+    session.compaction_turns = 5
+    for turn in range(1, turns + 1):
+        call_id = f"turn-{turn}"
+        session.messages.extend(
+            [
+                {"role": "user", "content": f"Question {turn}"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {"name": "lookup_transactions", "arguments": "{}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": call_id, "content": "X" * 800},
+                {"role": "assistant", "content": f"Answer {turn}"},
+            ]
+        )
+    return session
+
+
+def test_turn_threshold_compacts_from_the_fifth_user_message_without_mutating_history() -> None:
+    manager = ContextManager(DropAllJev())
+    system = {"role": "system", "content": "system"}
+
+    for turns in range(1, 5):
+        session = make_turn_session(turns)
+        full, report = manager.prepare(system, session, SummaryProvider(), include_messages=True)
+        assert report.strategy == "none"
+        assert report.after_messages == full
+
+    session = make_turn_session(5)
+    original = copy.deepcopy(session.messages)
+    compacted, report = manager.prepare(system, session, SummaryProvider(), include_messages=True)
+
+    assert report.strategy == "jev"
+    assert report.after_tokens < report.before_tokens
+    assert report.after_messages == compacted
+    assert any(message.get("content") == "Question 5" for message in compacted)
+    assert session.messages == original
+
+    session.messages.extend(
+        [{"role": "user", "content": "Question 6"}, {"role": "assistant", "content": "Answer 6"}]
+    )
+    _, later_report = manager.prepare(system, session, SummaryProvider())
+    assert later_report.strategy == "jev"
+
+
+def test_turn_threshold_uses_summary_when_jev_fails() -> None:
+    session = make_turn_session(5)
+    manager = ContextManager(FakeJev(error=RuntimeError("Jev unavailable")))
+
+    compacted, report = manager.prepare(
+        {"role": "system", "content": "system"},
+        session,
+        SummaryProvider(),
+        mode="auto",
+        include_messages=True,
+    )
+
+    assert report.strategy == "summary"
+    assert report.fallback_reason == "Jev unavailable"
+    assert report.after_messages == compacted
 
 
 def test_jev_keeps_trims_and_drops_complete_tool_pairs() -> None:

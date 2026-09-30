@@ -15,18 +15,16 @@
    TYPESAFE_API_KEY=...
    ```
 
-3. Start the MCP server and UI in separate terminals:
+3. Start both products with Compose:
 
    ```bash
-   uv run --env-file .env finance-mcp
-   uv run --env-file .env finance-ui
+   docker compose --env-file .env up --build
    ```
 
-4. Open `http://127.0.0.1:8501`. In the sidebar select **Upload CSV**, upload
-   `src/finance_agent/data/context_compaction_demo.csv`, select **jev**, and
-   click **Start new session**.
-
-5. Open **Settings** and enable **Show context live**. Return to **Chat**.
+4. Open `http://127.0.0.1:8501`, select **New chat**, then open **Settings**.
+   Select **Upload CSV**, upload `src/finance_agent/data/context_compaction_demo.csv`,
+   choose the **Auto** context strategy, and set **Compact after turns** to `5`.
+   Close Settings; the first prompt creates the saved chat.
 
 ## Prompts to paste, in order
 
@@ -40,13 +38,13 @@ Send each as a separate message and wait for its answer.
 
 ## What to show judges
 
-The 5,000-row CSV is intentionally valid under the upload limits. A broad lookup returns its first 50 matching rows, about 1,920 estimated tokens. The four broad lookups therefore cross the 8,000-token compaction trigger while preserving normal agent behavior.
+The 5,000-row CSV is intentionally valid under the upload limits. The first four prompts build complete tool-call history without compacting. Prompt five reaches the configured five-user-turn threshold and starts the existing Jev-first compaction flow while preserving normal agent behavior.
 
-In the **Context window**, show both tabs after prompt 5:
+Select **Context** in the chat header and show both tabs after prompt 5:
 
-- **Before · canonical**: the original history remains intact, including the old tool outputs.
-- **After · model input**: the Jev-selected context. Old tool-call/result pairs carry a **keep**, **trim**, or **drop** badge; dropped pairs are absent and trimmed tool results show an omission marker.
+- **Before**: the original history remains intact, including the old tool outputs.
+- **Model input**: the Jev-selected context. Old tool-call/result pairs carry a **keep**, **trim**, or **drop** badge; dropped pairs are absent and trimmed tool results show an omission marker.
 
-Also open the response's **Context management** expander. Capture the `strategy: "jev"`, before/after token counts, and `decisions` with both Noul probabilities. This is the audit receipt: Jev supplied relevance scores and the deterministic code mapped them to keep/trim/drop. It did not mutate the session's canonical history.
+Capture the `jev` strategy label, before/after token counts, and keep/trim/drop tool modules. Open a module's collapsed **Technical details** only when raw arguments or results are needed. This is the audit receipt: Jev supplied relevance scores and deterministic code mapped them to keep/trim/drop. It did not mutate the chat's canonical history.
 
-If the response says `strategy: "summary"`, the app fell back because Jev removed less than 5% (or was unavailable). Restart the session, confirm the **jev** strategy and `TYPESAFE_API_KEY`, then repeat the five prompts. Do not present a summary fallback as a Jev compaction result.
+If the inspector shows `summary`, the app used the configured Groq fallback because Jev removed less than 5% or was unavailable. Confirm `TYPESAFE_API_KEY`, start a new chat, and repeat the five prompts when a specifically Jev-backed demonstration is required. Do not present a summary fallback as a Jev compaction result.
