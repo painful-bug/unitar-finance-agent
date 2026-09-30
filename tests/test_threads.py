@@ -92,12 +92,14 @@ def test_uploaded_thread_survives_restart_without_exposing_csv(tmp_path: Path) -
             title="August savings",
             context_mode="summary",
             compaction_turns=20,
+            max_agent_steps=25,
         )
     )
     updated = run(restarted.get_chat_thread(created.session_id))
     assert updated.summary.title == "August savings"
     assert updated.context_mode == "summary"
     assert updated.compaction_turns == 20
+    assert updated.max_agent_steps == 25
 
     continued = run(restarted.ask(created.session_id, "Check again."))
     assert continued.status == "ok"

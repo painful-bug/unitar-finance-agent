@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
-import type { AgentResult, ChatThreadDetail, ChatThreadSummary, SessionInfo } from "./types";
+import type { AgentResult, AskFinanceAgentInput, ChatThreadDetail, ChatThreadSummary, SessionInfo, TraceEnvelope } from "./types";
 
 
 const THREAD_ID = "8a68c223-7e5a-4adc-9f1a-9c18a8f87be0";
@@ -34,6 +34,7 @@ function detail(threadId = THREAD_ID, title = "August review"): ChatThreadDetail
     transaction_count: 4,
     budget_rules: [],
     compaction_turns: 15,
+    max_agent_steps: 15,
     turns: [{ turn_id: SECOND_ID, created_at: "2026-09-30T08:00:00Z", question: "How much did I save?", state: "complete", result }],
   };
 }
@@ -47,6 +48,7 @@ function mockClient(saved: ChatThreadDetail[] = []) {
     transaction_count: 4,
     budget_rules: [],
     compaction_turns: 15,
+    max_agent_steps: 15,
     ledger_source: "demo",
   };
   return {
@@ -59,19 +61,20 @@ function mockClient(saved: ChatThreadDetail[] = []) {
       return thread;
     }),
     createFinanceSession: vi.fn().mockResolvedValue(created),
-    askFinanceAgent: vi.fn().mockImplementation(async ({ session_id, question }: { session_id: string; question: string }) => {
+    askFinanceAgent: vi.fn<(input: AskFinanceAgentInput, onProgress?: (envelope: TraceEnvelope) => void) => Promise<AgentResult>>().mockImplementation(async ({ session_id, question }) => {
       const next = detail(session_id, question.length > 48 ? `${question.slice(0, 47)}…` : question);
       next.turns[0].question = question;
       records.set(session_id, next);
       return result;
     }),
-    updateChatThread: vi.fn().mockImplementation(async ({ thread_id, title, context_mode, compaction_turns }) => {
+    updateChatThread: vi.fn().mockImplementation(async ({ thread_id, title, context_mode, compaction_turns, max_agent_steps }) => {
       const current = records.get(thread_id) ?? detail(thread_id);
       const next = {
         ...current,
         summary: { ...current.summary, title: title ?? current.summary.title },
         context_mode: context_mode ?? current.context_mode,
         compaction_turns: compaction_turns ?? current.compaction_turns,
+        max_agent_steps: max_agent_steps ?? current.max_agent_steps,
       };
       records.set(thread_id, next);
       return next;
@@ -89,6 +92,50 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("persistent chat shell", () => {
+  it("opens a prompt's trace, preserves selection, and shares the inspector with Context", async () => {
+    window.history.replaceState({}, "", `/chat/${THREAD_ID}`);
+    render(<App client={mockClient([detail()])} />);
+    await screen.findByRole("heading", { name: "August review" });
+    fireEvent.click(screen.getByRole("button", { name: "View trace" }));
+    expect(screen.getByLabelText("Prompt")).toHaveValue(SECOND_ID);
+    fireEvent.click(screen.getByRole("button", { name: "Close trace" }));
+    fireEvent.click(screen.getByRole("button", { name: "Trace" }));
+    expect(screen.getByLabelText("Prompt")).toHaveValue(SECOND_ID);
+    fireEvent.click(screen.getByRole("button", { name: "Context" }));
+    expect(screen.getByRole("button", { name: "Trace" })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Trace" }));
+    expect(screen.getByRole("button", { name: "Context" })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Trace" }));
+    expect(screen.getByLabelText("Prompt")).toHaveValue("");
+  });
+
+  it("captures milestones while closed, deduplicates events, and reconciles on completion", async () => {
+    window.history.replaceState({}, "", `/chat/${THREAD_ID}`);
+    const client = mockClient([detail()]);
+    let progress!: (envelope: TraceEnvelope) => void;
+    let finish!: (value: AgentResult) => void;
+    client.askFinanceAgent.mockImplementation((_input, callback) => { progress = callback!; return new Promise((resolve) => { finish = resolve; }); });
+    const { container } = render(<App client={client} />);
+    await screen.findByRole("heading", { name: "August review" });
+    fireEvent.change(screen.getByLabelText("Ask about your spending, budget, or savings"), { target: { value: "Same new prompt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(client.askFinanceAgent).toHaveBeenCalledOnce());
+    const envelope: TraceEnvelope = { version: 1, thread_id: THREAD_ID, turn_id: THREAD_ID,
+      event: { sequence: 1, timestamp: "2026-09-30T08:00:00Z", operation_id: "prompt", stage: "prompt", state: "completed", payload: { question: "Same new prompt" } } };
+    act(() => { progress(envelope); progress(envelope); progress({ ...envelope, event: { ...envelope.event, sequence: 2, operation_id: "model-1", stage: "model", state: "started", payload: {} } }); });
+    fireEvent.click(screen.getByRole("button", { name: "Trace" }));
+    expect(screen.getByRole("heading", { name: "Model request" })).toBeInTheDocument();
+    expect(container.querySelectorAll(".trace-stage.is-prompt")).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: SECOND_ID } });
+    act(() => progress({ ...envelope, event: { ...envelope.event, sequence: 3, operation_id: "model-1", stage: "model", state: "completed", payload: { content: "Live new answer" } } }));
+    expect(screen.getByLabelText("Prompt")).toHaveValue(SECOND_ID);
+    expect(screen.queryByText("Live new answer")).not.toBeInTheDocument();
+    client.getChatThread.mockResolvedValue(detail());
+    await act(async () => { finish(result); });
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled(); // Empty composer, request finished.
+    expect(client.getChatThread).toHaveBeenCalledTimes(2);
+  });
   it("renders a full-screen new-chat state and saved history", async () => {
     const client = mockClient([detail()]);
     render(<App client={client} />);
@@ -150,6 +197,8 @@ describe("persistent chat shell", () => {
     expect(await screen.findByText("Start a new chat to use a different ledger, date, or rule set.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Strategy"), { target: { value: "summary" } });
     await waitFor(() => expect(client.updateChatThread).toHaveBeenCalledWith({ thread_id: THREAD_ID, context_mode: "summary" }));
+    fireEvent.change(screen.getByLabelText("Max agent steps"), { target: { value: "25" } });
+    await waitFor(() => expect(client.updateChatThread).toHaveBeenCalledWith({ thread_id: THREAD_ID, max_agent_steps: 25 }));
   });
 
   it("keeps raw HTML inert in restored Markdown", async () => {

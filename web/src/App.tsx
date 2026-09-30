@@ -4,16 +4,19 @@ import { ChatPanel } from "./components/ChatPanel";
 import { ContextPanel } from "./components/ContextPanel";
 import { SettingsPanel, type LedgerSource } from "./components/SettingsPanel";
 import { ThreadSidebar } from "./components/ThreadSidebar";
+import { TracePanel } from "./components/TracePanel";
 import { FinanceMcpClient } from "./lib/mcp";
 import {
   DEFAULT_RULES_TEXT,
   loadCompactionTurns,
+  loadMaxAgentSteps,
   loadTheme,
   RULE_EDITOR_VERSION,
   loadRulePreferences,
   rulesSignature,
   saveRulePreferences,
   saveCompactionTurns,
+  saveMaxAgentSteps,
   saveTheme,
   type Theme,
   type RulePreferences,
@@ -78,6 +81,11 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
+  const [traceOpen, setTraceOpen] = useState(false);
+  const [traceSelection, setTraceSelection] = useState<string | null>(null);
+  const traceButton = useRef<HTMLButtonElement>(null);
+  const traceReturnFocus = useRef<HTMLElement | null>(null);
+  const requestRevision = useRef(0);
   const [deleteTarget, setDeleteTarget] = useState<ChatThreadSummary | null>(null);
   const deleteDialog = useRef<HTMLDialogElement>(null);
   const mobileMenuButton = useRef<HTMLButtonElement>(null);
@@ -94,6 +102,7 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
   const [overrideDate, setOverrideDate] = useState(false);
   const [asOfDate, setAsOfDate] = useState("");
   const [draftCompactionTurns, setDraftCompactionTurns] = useState(loadCompactionTurns);
+  const [draftMaxAgentSteps, setDraftMaxAgentSteps] = useState(loadMaxAgentSteps);
   const [prompt, setPrompt] = useState("");
   const [chatError, setChatError] = useState("");
   const [asking, setAsking] = useState(false);
@@ -118,6 +127,9 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
   const ledgerBytes = source === "upload" && upload ? upload.bytes : DEMO_SIGNATURE_BYTES;
   const contextMode = activeThread?.context_mode ?? draftContextMode;
   const compactionTurns = activeThread?.compaction_turns ?? draftCompactionTurns;
+  const pendingRun = activeThread?.turns.some((turn) => turn.state === "pending") ?? false;
+  const busy = asking || pendingRun;
+  const maxAgentSteps = activeThread?.max_agent_steps ?? draftMaxAgentSteps;
   const liveContext: ContextReport | null = [...(activeThread?.turns ?? [])]
     .reverse()
     .find((turn) => turn.result?.context)?.result?.context ?? null;
@@ -134,6 +146,7 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
     try {
       const detail = await client.getChatThread(threadId);
       setActiveThread(detail);
+      askingRef.current = detail.turns.some((turn) => turn.state === "pending");
       setOptimisticQuestion(null);
       setChatError("");
       document.title = `${detail.summary.title} · Finance Agent`;
@@ -168,6 +181,9 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
         return;
       }
       stablePath.current = window.location.pathname;
+      setTraceOpen(false);
+      setTraceSelection(null);
+      setContextOpen(false);
       const threadId = routedThreadId();
       if (threadId) void loadThread(threadId);
       else {
@@ -178,11 +194,35 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
     };
     window.addEventListener("popstate", navigateHistory);
     return () => {
+      requestRevision.current += 1;
       window.clearTimeout(initialLoad);
       window.removeEventListener("popstate", navigateHistory);
       void client.close();
     };
   }, [client, connectAndLoad, loadThread]);
+
+  useEffect(() => {
+    if (!pendingRun || asking || !activeThread) return;
+    let cancelled = false;
+    let timer: number;
+    const threadId = activeThread.summary.thread_id;
+    const poll = async () => {
+      try {
+        const detail = await client.getChatThread(threadId);
+        if (cancelled) return;
+        setActiveThread(detail);
+        const running = detail.turns.some((turn) => turn.state === "pending");
+        askingRef.current = running;
+        if (!running) { await refreshThreads(); return; }
+      } catch (error) {
+        if (cancelled) return;
+        setChatError(errorMessage(error, "Could not recover the running trace."));
+      }
+      if (!cancelled) timer = window.setTimeout(() => void poll(), 1000);
+    };
+    timer = window.setTimeout(() => void poll(), 1000);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [pendingRun, asking, activeThread, client, refreshThreads]);
 
   useEffect(() => {
     let current = true;
@@ -278,7 +318,11 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
 
   const createSession = async (): Promise<SessionInfo> => {
     const signature = await rulesSignature(ledgerBytes, preferences.rulesText);
-    const input: CreateFinanceSessionInput = { context_mode: draftContextMode, compaction_turns: draftCompactionTurns };
+    const input: CreateFinanceSessionInput = {
+      context_mode: draftContextMode,
+      compaction_turns: draftCompactionTurns,
+      max_agent_steps: draftMaxAgentSteps,
+    };
     const selectedCsv = csvText();
     if (selectedCsv !== undefined) {
       input.csv_text = selectedCsv;
@@ -295,6 +339,8 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
     window.history.pushState({}, "", stablePath.current);
     setSidebarOpen(false);
     setContextOpen(false);
+    setTraceOpen(false);
+    setTraceSelection(null);
     await loadThread(threadId);
     document.getElementById("chat-prompt")?.focus();
   };
@@ -309,6 +355,8 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
     setChatError("");
     setGlobalError("");
     setContextOpen(false);
+    setTraceOpen(false);
+    setTraceSelection(null);
     setSidebarOpen(false);
     document.title = "Personal Finance Agent";
     window.setTimeout(() => document.getElementById("chat-prompt")?.focus(), 0);
@@ -321,12 +369,27 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
 
   const closeContext = () => {
     setContextOpen(false);
+    if (document.fullscreenElement?.id === "live-context") void document.exitFullscreen().catch(() => undefined);
     contextButton.current?.focus();
+  };
+
+  const closeTrace = () => {
+    setTraceOpen(false);
+    if (document.fullscreenElement?.id === "agent-trace") void document.exitFullscreen().catch(() => undefined);
+    (traceReturnFocus.current?.isConnected ? traceReturnFocus.current : traceButton.current)?.focus();
+  };
+
+  const viewTrace = (turnId: string | null) => {
+    traceReturnFocus.current = document.activeElement as HTMLElement;
+    setTraceSelection(turnId);
+    setContextOpen(false);
+    if (document.fullscreenElement?.id === "live-context") void document.exitFullscreen().catch(() => undefined);
+    setTraceOpen(true);
   };
 
   const askQuestion = async () => {
     const question = prompt.trim();
-    if (!question || askingRef.current) return;
+    if (!question || askingRef.current || busy) return;
     askingRef.current = true;
     setAsking(true);
     setChatError("");
@@ -335,9 +398,13 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
     const turns = activeThread?.turns.length ?? 0;
     setCompacting(turns + 1 >= compactionTurns);
     let sessionId = activeThread?.summary.thread_id ?? null;
+    let createdSession: SessionInfo | null = null;
+    let recoveredPending = false;
+    const revision = ++requestRevision.current;
     try {
       if (!sessionId) {
         const created = await createSession();
+        createdSession = created;
         sessionId = created.session_id;
         stablePath.current = `/chat/${sessionId}`;
         window.history.pushState({}, "", stablePath.current);
@@ -348,6 +415,28 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
         context_mode: contextMode,
         include_context: true,
         compaction_turns: compactionTurns,
+      }, (envelope) => {
+        if (revision !== requestRevision.current || envelope.thread_id !== sessionId || stablePath.current !== `/chat/${sessionId}`) return;
+        const event = envelope.event;
+        setActiveThread((current) => {
+          if (current && current.summary.thread_id !== envelope.thread_id) return current;
+          const base = current ?? (createdSession ? {
+            summary: { thread_id: envelope.thread_id, title: question, created_at: event.timestamp, updated_at: event.timestamp, turn_count: 0, ledger_source: createdSession.ledger_source, upload_name: createdSession.upload_name },
+            as_of_date: createdSession.as_of_date, context_mode: createdSession.context_mode,
+            transaction_count: createdSession.transaction_count, budget_rules: createdSession.budget_rules,
+            compaction_turns: createdSession.compaction_turns, max_agent_steps: createdSession.max_agent_steps, turns: [],
+          } : null);
+          if (!base) return current;
+          const turn = base.turns.find((item) => item.turn_id === envelope.turn_id);
+          if (turn?.execution_trace?.some((item) => item.sequence === event.sequence)) return current;
+          if (!turn && event.stage !== "prompt") return current;
+          const nextTurn = { ...turn, turn_id: envelope.turn_id, question: turn?.question ?? question,
+            created_at: turn?.created_at ?? event.timestamp, state: "pending" as const, execution_trace_version: 1 as const,
+            execution_trace: [...(turn?.execution_trace ?? []), event].sort((a, b) => a.sequence - b.sequence) };
+          const nextTurns = turn ? base.turns.map((item) => item.turn_id === turn.turn_id ? nextTurn : item) : [...base.turns, nextTurn];
+          return { ...base, summary: { ...base.summary, turn_count: nextTurns.length, updated_at: event.timestamp }, turns: nextTurns };
+        });
+        if (event.stage === "prompt") setOptimisticQuestion(null);
       });
       const detail = await client.getChatThread(sessionId);
       setActiveThread(detail);
@@ -359,6 +448,7 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
       if (sessionId) {
         try {
           const detail = await client.getChatThread(sessionId);
+          recoveredPending = detail.turns.some((turn) => turn.state === "pending");
           setActiveThread(detail);
           setOptimisticQuestion(null);
           await refreshThreads();
@@ -367,14 +457,15 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
         }
       }
     } finally {
-      askingRef.current = false;
+      if (requestRevision.current === revision) requestRevision.current += 1;
+      askingRef.current = recoveredPending;
       setAsking(false);
       setCompacting(false);
     }
   };
 
   const updateThread = async (input: Omit<UpdateChatThreadInput, "thread_id">) => {
-    if (!activeThread) return;
+    if (!activeThread || busy) return;
     setGlobalError("");
     try {
       const detail = await client.updateChatThread({ thread_id: activeThread.summary.thread_id, ...input });
@@ -425,12 +516,12 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
   return (
     <>
       <a className="skip-link" href="#chat-main">Skip to conversation</a>
-      <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${contextOpen ? "context-open" : ""}`}>
+      <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${contextOpen || traceOpen ? "context-open" : ""}`}>
         <ThreadSidebar
           threads={threads}
           activeId={activeThread?.summary.thread_id ?? null}
           connectionStatus={connectionStatus}
-          disabled={asking || loadingThread}
+          disabled={busy || loadingThread}
           mobileOpen={sidebarOpen}
           collapsed={sidebarCollapsed}
           theme={theme}
@@ -449,7 +540,8 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
             <button ref={mobileMenuButton} className="icon-button mobile-menu-button" type="button" aria-label="Open conversations" onClick={() => setSidebarOpen(true)}>☰</button>
             <div className="chat-heading"><h1>{headerTitle}</h1><p>{headerMeta}</p></div>
             <div className="header-actions">
-              <button ref={contextButton} className="header-button" type="button" aria-pressed={contextOpen} onClick={() => contextOpen ? closeContext() : setContextOpen(true)}>Context</button>
+              <button ref={contextButton} className="header-button" type="button" aria-pressed={contextOpen} onClick={() => { if (contextOpen) closeContext(); else { setTraceOpen(false); setContextOpen(true); } }}>Context</button>
+              <button ref={traceButton} className="header-button" type="button" aria-pressed={traceOpen} onClick={() => { if (traceOpen) closeTrace(); else { traceReturnFocus.current = traceButton.current; setContextOpen(false); setTraceOpen(true); } }}>Trace</button>
               <button className="header-button" type="button" onClick={() => setSettingsOpen(true)}>Settings</button>
             </div>
           </header>
@@ -465,18 +557,21 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
             thread={activeThread}
             prompt={prompt}
             optimisticQuestion={optimisticQuestion}
-            pending={asking || loadingThread}
+            pending={busy || loadingThread}
             compacting={compacting}
             error={chatError}
             onPromptChange={setPrompt}
             onSubmit={() => void askQuestion()}
+            onViewTrace={viewTrace}
           />
         </main>
 
         <ContextPanel context={liveContext} open={contextOpen} onClose={closeContext} />
+        <TracePanel key={activeThread?.summary.thread_id ?? "new"} turns={activeThread?.turns ?? []} optimisticQuestion={optimisticQuestion} selectedTurnId={traceSelection} onSelectTurn={setTraceSelection} open={traceOpen} onClose={closeTrace} />
 
         <SettingsPanel
           open={settingsOpen}
+          disabled={busy}
           thread={activeThread}
           source={source}
           onSourceChange={(next) => { ruleInputRevision.current += 1; setSource(next); }}
@@ -494,6 +589,11 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
           onCompactionTurnsChange={(turns) => {
             if (activeThread) void updateThread({ compaction_turns: turns });
             else { setDraftCompactionTurns(turns); saveCompactionTurns(turns); }
+          }}
+          maxAgentSteps={maxAgentSteps}
+          onMaxAgentStepsChange={(steps) => {
+            if (activeThread) void updateThread({ max_agent_steps: steps });
+            else { setDraftMaxAgentSteps(steps); saveMaxAgentSteps(steps); }
           }}
           rulesText={preferences.rulesText}
           onRulesTextChange={updateRulesText}

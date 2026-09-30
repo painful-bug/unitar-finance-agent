@@ -153,6 +153,7 @@ export function ContextPanel({ context, open, onClose }: ContextPanelProps) {
       aria-label="Conversation context"
       aria-modal={compact && open ? true : undefined}
       aria-hidden={!open}
+      inert={!open}
       onKeyDown={handleKeys}
     >
       <div className="inspector-header">

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -43,6 +44,9 @@ class DeterministicProvider:
                 content=json.dumps({"rules": [rule.model_dump(mode="json") for rule in rules]})
             )
 
+        question = next((message.get("content", "") for message in reversed(messages) if message["role"] == "user"), "")
+        if "Trace slowly" in question:
+            time.sleep(1.5)  # Expose running stages to browser tests before each deterministic response.
         if messages[-1]["role"] == "tool":
             return AssistantTurn(content="Deterministic finance answer from the active ledger.")
         self.tool_calls += 1
@@ -83,7 +87,7 @@ if __name__ == "__main__":
             host=os.getenv("MCP_HOST", "127.0.0.1"),
             port=int(os.getenv("MCP_PORT", "8001")),
             streamable_http_path="/mcp",
-            json_response=True,
+            json_response=False,
         )
     except KeyboardInterrupt:
         pass

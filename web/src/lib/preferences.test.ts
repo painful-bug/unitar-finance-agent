@@ -5,16 +5,20 @@ import {
   DEFAULT_RULES_TEXT,
   COMPACTION_TURNS_KEY,
   DEFAULT_COMPACTION_TURNS,
+  DEFAULT_MAX_AGENT_STEPS,
+  MAX_AGENT_STEPS_KEY,
   RULE_EDITOR_VERSION,
   RULE_PREFERENCES_KEY,
   THEME_KEY,
   defaultRulePreferences,
   loadRulePreferences,
   loadCompactionTurns,
+  loadMaxAgentSteps,
   loadTheme,
   rulesSignature,
   saveRulePreferences,
   saveCompactionTurns,
+  saveMaxAgentSteps,
   saveTheme,
 } from "./preferences";
 
@@ -105,6 +109,17 @@ describe("interface preferences", () => {
     for (const invalid of [4, 101, 5.5, "5"]) {
       localStorage.setItem(COMPACTION_TURNS_KEY, JSON.stringify(invalid));
       expect(loadCompactionTurns()).toBe(DEFAULT_COMPACTION_TURNS);
+    }
+  });
+
+  it("persists a valid max-agent-step limit and rejects invalid stored values", () => {
+    expect(loadMaxAgentSteps()).toBe(DEFAULT_MAX_AGENT_STEPS);
+    saveMaxAgentSteps(25);
+    expect(loadMaxAgentSteps()).toBe(25);
+
+    for (const invalid of [0, 101, 1.5, "15"]) {
+      localStorage.setItem(MAX_AGENT_STEPS_KEY, JSON.stringify(invalid));
+      expect(loadMaxAgentSteps()).toBe(DEFAULT_MAX_AGENT_STEPS);
     }
   });
 

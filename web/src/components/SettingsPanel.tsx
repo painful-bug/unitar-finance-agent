@@ -8,6 +8,7 @@ export type LedgerSource = "demo" | "upload";
 
 interface SettingsPanelProps {
   open: boolean;
+  disabled?: boolean;
   thread: ChatThreadDetail | null;
   source: LedgerSource;
   onSourceChange: (source: LedgerSource) => void;
@@ -23,6 +24,8 @@ interface SettingsPanelProps {
   onAsOfDateChange: (value: string) => void;
   compactionTurns: number;
   onCompactionTurnsChange: (value: number) => void;
+  maxAgentSteps: number;
+  onMaxAgentStepsChange: (value: number) => void;
   rulesText: string;
   onRulesTextChange: (value: string) => void;
   parsedRules: BudgetRule[] | null;
@@ -123,17 +126,28 @@ export function SettingsPanel(props: SettingsPanelProps) {
           <div className="settings-grid">
             <div className="field-stack">
               <label htmlFor="context-mode">Strategy</label>
-              <select id="context-mode" value={props.contextMode} onChange={(event) => props.onContextModeChange(event.target.value as ContextMode)}>
+              <select id="context-mode" disabled={props.disabled} value={props.contextMode} onChange={(event) => props.onContextModeChange(event.target.value as ContextMode)}>
                 <option value="auto">Auto</option><option value="jev">Jev</option><option value="summary">Summary</option>
               </select>
             </div>
             <div className="field-stack">
               <label htmlFor="compaction-turns">Compact after turns</label>
-              <input id="compaction-turns" type="number" min={5} max={100} value={props.compactionTurns} onChange={(event) => {
+              <input id="compaction-turns" disabled={props.disabled} type="number" min={5} max={100} value={props.compactionTurns} onChange={(event) => {
                 const value = event.currentTarget.valueAsNumber;
                 if (Number.isInteger(value) && value >= 5 && value <= 100) props.onCompactionTurnsChange(value);
               }} />
             </div>
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <div className="section-heading"><h3>Agent execution</h3><p>Limit each answer to a fixed number of model-and-tool steps.</p></div>
+          <div className="field-stack">
+            <label htmlFor="max-agent-steps">Max agent steps</label>
+            <input id="max-agent-steps" disabled={props.disabled} type="number" min={1} max={100} value={props.maxAgentSteps} onChange={(event) => {
+              const value = event.currentTarget.valueAsNumber;
+              if (Number.isInteger(value) && value >= 1 && value <= 100) props.onMaxAgentStepsChange(value);
+            }} />
           </div>
         </section>
 

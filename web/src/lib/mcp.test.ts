@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { FinanceMcpClient, type McpAdapter } from "./mcp";
+import { FinanceMcpClient, parseTraceEnvelope, type McpAdapter } from "./mcp";
 
 const TOOLS = [
   { name: "parse_budget_rules" },
@@ -24,6 +24,27 @@ function fakeAdapter(result: unknown): McpAdapter {
 }
 
 describe("FinanceMcpClient", () => {
+  it("validates live trace notifications and ignores another thread", async () => {
+    const threadId = "8a68c223-7e5a-4adc-9f1a-9c18a8f87be0";
+    const envelope = { version: 1, thread_id: threadId, turn_id: threadId,
+      event: { sequence: 1, timestamp: "2026-09-30T08:00:00Z", operation_id: "model-1", stage: "model", state: "started", payload: {} } };
+    expect(parseTraceEnvelope(JSON.stringify(envelope))).toEqual(envelope);
+    expect(parseTraceEnvelope("invalid JSON")).toBeNull();
+    for (const invalid of [{ sequence: -1 }, { stage: "unknown" }, { duration_ms: -1 }, { payload: [] }, { timestamp: "2026-09-30T08:00:00" }]) {
+      expect(parseTraceEnvelope(JSON.stringify({ ...envelope, event: { ...envelope.event, ...invalid } }))).toBeNull();
+    }
+    const adapter = fakeAdapter({ structuredContent: { answer: "Done", status: "ok", steps: 1 } });
+    vi.mocked(adapter.callTool).mockImplementation(async (_name, _args, options) => {
+      expect(options?.timeout).toBe(600_000);
+      options?.onprogress?.({ message: "broken" });
+      options?.onprogress?.({ message: JSON.stringify({ ...envelope, thread_id: "4726647e-78ca-461b-b7a0-6653e8f6a58d" }) });
+      options?.onprogress?.({ message: JSON.stringify(envelope) });
+      return { structuredContent: { answer: "Done", status: "ok", steps: 1 } };
+    });
+    const progress = vi.fn();
+    await new FinanceMcpClient(() => adapter).askFinanceAgent({ session_id: threadId, question: "Check" }, progress);
+    expect(progress).toHaveBeenCalledExactlyOnceWith(envelope);
+  });
   it("discovers the exact tools and returns a valid structured result", async () => {
     const adapter = fakeAdapter({
       structuredContent: {
@@ -33,6 +54,7 @@ describe("FinanceMcpClient", () => {
         transaction_count: 4,
         budget_rules: [],
         compaction_turns: 15,
+        max_agent_steps: 15,
         ledger_source: "demo",
       },
     });

@@ -60,6 +60,7 @@ def test_mcp_session_lifecycle_and_structured_results(tmp_path) -> None:
             session_id = created.structured_content["session_id"]
             assert created.structured_content["transaction_count"] > 0
             assert created.structured_content["compaction_turns"] == 15
+            assert created.structured_content["max_agent_steps"] == 15
             assert created.structured_content["ledger_source"] == "demo"
 
             answered = await client.call_tool(
@@ -82,10 +83,11 @@ def test_mcp_session_lifecycle_and_structured_results(tmp_path) -> None:
 
             renamed = await client.call_tool(
                 "update_chat_thread",
-                {"thread_id": session_id, "title": "July review", "compaction_turns": 20},
+                {"thread_id": session_id, "title": "July review", "compaction_turns": 20, "max_agent_steps": 25},
             )
             assert renamed.structured_content["summary"]["title"] == "July review"
             assert renamed.structured_content["compaction_turns"] == 20
+            assert renamed.structured_content["max_agent_steps"] == 25
 
             closed = await client.call_tool("close_finance_session", {"session_id": session_id})
             assert closed.structured_content == {"session_id": session_id, "closed": True}
@@ -124,6 +126,31 @@ def test_mcp_compaction_turn_contract_is_bounded_and_configurable() -> None:
                 "create_finance_session", {"compaction_turns": 5}
             )
             assert created.structured_content["compaction_turns"] == 5
+
+            max_steps = schemas["create_finance_session"]["properties"]["max_agent_steps"]
+            assert max_steps["default"] == 15
+            assert max_steps["minimum"] == 1
+            assert max_steps["maximum"] == 100
+            assert "max_agent_steps" not in schemas["ask_finance_agent"]["properties"]
+
+            configured = await client.call_tool("create_finance_session", {"max_agent_steps": 1})
+            assert configured.structured_content["max_agent_steps"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_saved_agent_step_limit_controls_execution() -> None:
+    async def scenario() -> None:
+        server = build_server(SessionStore(provider=FakeProvider()))
+        async with Client(server) as client:
+            created = await client.call_tool("create_finance_session", {"max_agent_steps": 1})
+            result = await client.call_tool(
+                "ask_finance_agent",
+                {"session_id": created.structured_content["session_id"], "question": "July groceries?"},
+            )
+            assert result.structured_content["status"] == "max_steps"
+            assert result.structured_content["steps"] == 1
+            assert result.structured_content["answer"] == "Reached the maximum of 1 agent steps without a final answer."
 
     asyncio.run(scenario())
 

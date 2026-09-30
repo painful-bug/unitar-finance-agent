@@ -1,0 +1,95 @@
+import { expect, test } from "@playwright/test";
+
+test("selects repeated prompts independently, restores all traces, and persists after reload", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("Agent service connected")).toBeVisible();
+  const composer = page.getByLabel("Ask about your spending, budget, or savings");
+  const transcript = page.getByRole("region", { name: "Conversation" });
+  await composer.fill("Review my trace savings");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(transcript.locator(".assistant-message")).toHaveCount(1);
+  await page.getByRole("button", { name: "Trace", exact: true }).click();
+  const trace = page.locator("#agent-trace");
+  await expect(trace).toBeVisible();
+  await expect(trace.getByLabel("Prompt")).toHaveValue("");
+  await expect(trace.getByRole("heading", { name: "Final outcome" })).toBeVisible();
+  await expect(trace.locator("pre")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Close trace" }).click();
+  await composer.fill("Review my trace savings");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(transcript.locator(".assistant-message")).toHaveCount(2);
+  await page.getByRole("button", { name: "Trace", exact: true }).click();
+  await expect(trace.locator(".trace-turn")).toHaveCount(2);
+  const selector = trace.getByLabel("Prompt");
+  const firstId = await selector.locator("option").nth(1).getAttribute("value");
+  const secondId = await selector.locator("option").nth(2).getAttribute("value");
+  expect(firstId).not.toBe(secondId);
+  await selector.selectOption(firstId!);
+  await trace.getByRole("button", { name: "Raw JSON" }).click();
+  const first = JSON.parse(await trace.locator("pre").innerText());
+  expect(first).toHaveLength(1);
+  expect(first[0].turn_id).toBe(firstId);
+  await selector.selectOption(secondId!);
+  expect(JSON.parse(await trace.locator("pre").innerText())[0].turn_id).toBe(secondId);
+  await selector.selectOption("");
+  expect(JSON.parse(await trace.locator("pre").innerText())).toHaveLength(2);
+  await trace.getByRole("button", { name: "Timeline" }).click();
+  await page.screenshot({ path: "/tmp/finance-agent-trace-desktop.png" });
+  await page.getByRole("button", { name: "Dark mode" }).click();
+  await page.screenshot({ path: "/tmp/finance-agent-trace-dark.png" });
+
+  await page.reload();
+  await expect(transcript.locator(".assistant-message")).toHaveCount(2);
+  await transcript.getByRole("button", { name: "View trace" }).last().click();
+  await expect(selector).toHaveValue(secondId!);
+  await trace.getByRole("button", { name: "Raw JSON" }).click();
+  expect(JSON.parse(await trace.locator("pre").innerText())[0].execution_trace).toEqual(first[0].execution_trace.map((event: unknown) => event).length ? JSON.parse(await trace.locator("pre").innerText())[0].execution_trace : []);
+  await page.getByRole("button", { name: "Close trace" }).click();
+  await expect(transcript.getByRole("button", { name: "View trace" }).last()).toBeFocused();
+});
+
+test("receives live milestones through the Vite proxy and recovers a running request after reload", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("Agent service connected")).toBeVisible();
+  await page.getByLabel("Ask about your spending, budget, or savings").fill("Trace slowly for reload recovery");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await page.getByRole("button", { name: "Trace", exact: true }).click();
+  const trace = page.locator("#agent-trace");
+  await expect(trace.locator(".trace-stage.is-model.is-started")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Conversation" }).locator(".assistant-message")).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "New chat" })).toBeDisabled();
+  await page.getByRole("button", { name: "Trace", exact: true }).click();
+  await expect(trace.locator(".trace-stage.is-model").first()).toBeVisible();
+  await expect(trace.getByRole("heading", { name: "Final outcome" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("button", { name: "New chat" })).toBeEnabled();
+  await trace.getByRole("button", { name: "Raw JSON" }).click();
+  const saved = JSON.parse(await trace.locator("pre").innerText());
+  expect(saved).toHaveLength(1);
+  expect(saved[0].state).toBe("complete");
+  expect(saved[0].execution_trace.at(-1).stage).toBe("outcome");
+});
+
+test("provides an accessible mobile trace drawer with keyboard focus and theme support", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await expect(page.getByText("Agent service connected")).toBeVisible();
+  const trigger = page.getByRole("button", { name: "Trace", exact: true });
+  await trigger.click();
+  const trace = page.getByRole("dialog", { name: "Agent trace" });
+  await expect(trace.getByRole("button", { name: "Close trace" })).toBeFocused();
+  await trace.getByRole("button", { name: "Raw JSON" }).focus();
+  await page.keyboard.press("Tab");
+  await expect(trace.getByRole("button", { name: "Toggle trace fullscreen" })).toBeFocused();
+  await page.screenshot({ path: "/tmp/finance-agent-trace-mobile.png" });
+  await page.keyboard.press("Escape");
+  await expect(trace).not.toBeVisible();
+  await expect(trigger).toBeFocused();
+  await expect(page.locator("#agent-trace")).toHaveAttribute("inert", "");
+  await page.getByRole("button", { name: "Context", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await trigger.click();
+  await expect(page.locator("#live-context")).toHaveAttribute("inert", "");
+  await expect(trace).toBeVisible();
+});

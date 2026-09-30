@@ -325,6 +325,44 @@ strong { font-weight: 600; }
 .context-empty { padding: 40px 16px; color: var(--text-muted); text-align: center; font-size: 12px; line-height: 20px; }
 #live-context:fullscreen { width: 100%; height: 100%; padding: 0; background: var(--surface); }
 
+.view-trace-button { display: flex; align-items: center; gap: 6px; margin-left: auto; padding: 0 6px; border: 0; background: transparent; color: var(--text-secondary); font-size: 11px; }
+.view-trace-button:hover { color: var(--accent); }
+.trace-controls { padding: 12px 16px 0; }
+.trace-controls label { display: block; margin-bottom: 6px; color: var(--text-secondary); font-size: 12px; }
+.trace-controls select { width: 100%; min-height: 44px; padding: 8px; border: 1px solid var(--text-muted); border-radius: 6px; background: var(--surface); color: var(--text); }
+.trace-controls .context-tabs { padding-inline: 0; }
+.trace-list { overflow-anchor: none; }
+.trace-turn + .trace-turn { margin-top: 28px; }
+.trace-turn-heading h3 { margin: 0; font-size: 14px; line-height: 22px; overflow-wrap: anywhere; }
+.trace-turn-heading p, .trace-stage-meta { color: var(--text-muted); font-size: 11px; line-height: 18px; }
+.trace-stage { --trace-color: var(--text-secondary); border-left: 3px solid var(--trace-color); border-radius: 6px; margin-top: 12px; padding: 12px; background: color-mix(in srgb, var(--trace-color) 5%, var(--surface)); overflow-wrap: anywhere; font-size: 12px; line-height: 20px; }
+.trace-stage.is-prompt { --trace-color: #005fcc; }
+.trace-stage.is-context { --trace-color: #7c3aed; }
+.trace-stage.is-tool { --trace-color: #0f766e; }
+.trace-stage.is-outcome { --trace-color: var(--success); }
+.trace-stage.is-failed { --trace-color: var(--danger); }
+.trace-stage.is-warning, .trace-stage.is-interrupted { --trace-color: var(--warning); }
+:root[data-theme="dark"] .trace-stage.is-prompt { --trace-color: #60a5fa; }
+:root[data-theme="dark"] .trace-stage.is-context { --trace-color: #c4b5fd; }
+:root[data-theme="dark"] .trace-stage.is-tool { --trace-color: #5eead4; }
+:root[data-theme="dark"] .trace-stage.is-failed { --trace-color: var(--danger); }
+:root[data-theme="dark"] .trace-stage.is-warning, :root[data-theme="dark"] .trace-stage.is-interrupted { --trace-color: var(--warning); }
+.trace-stage-header { display: flex; align-items: center; gap: 8px; }
+.trace-icon { color: var(--trace-color); font-size: 16px; }
+.trace-stage-header h4 { flex: 1; margin: 0; font-size: 12px; }
+.trace-status { font-size: 10px; color: var(--text-secondary); }
+.trace-stage.is-started .trace-status { color: var(--accent); }
+.trace-stage .tool-activity { margin-top: 8px; }
+.trace-warning { color: var(--warning); font-size: 12px; }
+.trace-fields { margin: 6px 0; }
+.trace-fields > div { margin: 8px 0; }
+.trace-fields dt { font-weight: 600; color: var(--text-secondary); }
+.trace-fields dd { margin-left: 10px; }
+.trace-value { white-space: pre-wrap; overflow-wrap: anywhere; }
+.trace-values { padding-left: 20px; }
+.trace-json { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+#agent-trace:fullscreen { width: 100%; height: 100%; background: var(--surface); }
+
 dialog { color: var(--text); }
 dialog::backdrop { background: rgb(0 0 0 / 42%); }
 .settings-dialog { width: min(720px, calc(100vw - 32px)); max-height: min(860px, calc(100dvh - 32px)); margin: auto; border: 0; border-radius: 12px; padding: 0; background: var(--surface); box-shadow: var(--shadow-modal); overflow: hidden; }

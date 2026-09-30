@@ -50,6 +50,7 @@ export interface SessionInfo {
   transaction_count: number;
   budget_rules: BudgetRule[];
   compaction_turns: number;
+  max_agent_steps: number;
   ledger_source: "demo" | "upload";
   upload_name?: string | null;
 }
@@ -119,6 +120,27 @@ export interface ChatTurn {
   question: string;
   state: "pending" | "complete" | "interrupted";
   result?: AgentResult | null;
+  execution_trace_version?: 1 | null;
+  execution_trace?: ExecutionTraceEvent[];
+}
+
+export interface ExecutionTraceEvent {
+  sequence: number;
+  timestamp: string;
+  operation_id: string;
+  stage: "prompt" | "context" | "model" | "tool" | "outcome";
+  state: "started" | "completed" | "failed" | "warning";
+  step?: number | null;
+  tool_call_id?: string | null;
+  duration_ms?: number | null;
+  payload: Record<string, unknown>;
+}
+
+export interface TraceEnvelope {
+  version: 1;
+  thread_id: string;
+  turn_id: string;
+  event: ExecutionTraceEvent;
 }
 
 export interface ChatThreadDetail {
@@ -128,6 +150,7 @@ export interface ChatThreadDetail {
   transaction_count: number;
   budget_rules: BudgetRule[];
   compaction_turns: number;
+  max_agent_steps: number;
   turns: ChatTurn[];
 }
 
@@ -141,6 +164,7 @@ export interface UpdateChatThreadInput {
   title?: string | null;
   context_mode?: ContextMode | null;
   compaction_turns?: number | null;
+  max_agent_steps?: number | null;
 }
 
 export interface DeleteChatThreadResult {
@@ -160,6 +184,7 @@ export interface CreateFinanceSessionInput {
   context_mode?: ContextMode;
   budget_rules?: BudgetRule[] | null;
   compaction_turns?: number;
+  max_agent_steps?: number;
 }
 
 export interface AskFinanceAgentInput {

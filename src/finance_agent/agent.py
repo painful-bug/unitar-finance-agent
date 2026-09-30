@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+from time import monotonic
 from typing import Any, Literal, Protocol
 
 from groq import Groq
 from pydantic import BaseModel, Field, ValidationError
 
 from .models import AgentResult, ContextManagementError, ContextReport, Session, TraceEvent
+from .tracing import EventCallback, MilestoneCallback, TraceRecorder, operation
 
 
 class ToolCall(BaseModel):
@@ -100,6 +102,7 @@ class GroqProvider:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         response_model: type[BaseModel] | None = None,
+        event_callback: MilestoneCallback | None = None,
     ) -> AssistantTurn:
         kwargs: dict[str, Any] = {"model": self.model, "messages": messages}
         if tools:
@@ -114,7 +117,32 @@ class GroqProvider:
                     "schema": _groq_schema(response_model),
                 },
             }
-        message = self.client.chat.completions.create(**kwargs).choices[0].message
+        choice = self.client.chat.completions.create(**kwargs).choices[0]
+        message = choice.message
+        if not message.tool_calls and not (message.content or "").strip():
+            if event_callback:
+                event_callback(dict(stage="model", state="warning", operation_id="empty-response",
+                                    payload={"message": "Empty model response; retrying once."}))
+            kwargs["messages"] = [
+                *messages,
+                {
+                    "role": "system",
+                    "content": (
+                        "Your previous response was empty. Continue with a ledger tool call "
+                        "or a non-empty answer. If the requested information is unavailable, "
+                        "explain the limitation."
+                    ),
+                },
+            ]
+            with operation(event_callback, "model", "retry", model=self.model, message_count=len(kwargs["messages"]), tool_count=len(tools or [])) as retry:
+                choice = self.client.chat.completions.create(**kwargs).choices[0]
+                message = choice.message
+                retry.update(content=message.content, tool_calls=[{"id": call.id, "name": call.function.name, "arguments": call.function.arguments} for call in (message.tool_calls or [])])
+            if not message.tool_calls and not (message.content or "").strip():
+                raise ValueError(
+                    f"Model returned no answer or tool calls after one retry "
+                    f"(finish_reason={choice.finish_reason})."
+                )
         calls = [
             ToolCall(id=call.id, name=call.function.name, arguments=call.function.arguments)
             for call in (message.tool_calls or [])
@@ -169,7 +197,7 @@ def _execute_tool(session: Session, call: ToolCall, step: int) -> tuple[str, Tra
     except (ValidationError, ValueError) as exc:
         error = f"invalid tool arguments: {exc}"
         return json.dumps({"error": error}), TraceEvent(
-            step=step, tool=call.name, arguments=raw_args, error=error
+            step=step, tool=call.name, arguments=raw_args if isinstance(raw_args, dict) else None, error=error
         )
     dumped = result.model_dump(mode="json")
     return result.model_dump_json(), TraceEvent(
@@ -177,13 +205,14 @@ def _execute_tool(session: Session, call: ToolCall, step: int) -> tuple[str, Tra
     )
 
 
-def run_agent(
+def _run_agent(
     session: Session,
     user_question: str,
     provider: ChatProvider,
     context_manager: Any | None = None,
-    max_steps: int = 6,
+    max_steps: int = 15,
     include_context: bool = False,
+    emit: MilestoneCallback | None = None,
 ) -> AgentResult:
     session.messages.append({"role": "user", "content": user_question})
     trace: list[TraceEvent] = []
@@ -192,15 +221,15 @@ def run_agent(
     for step in range(1, max_steps + 1):
         system = {"role": "system", "content": _system_prompt(session)}
         try:
-            if context_manager:
-                messages, context_report = context_manager.prepare(
-                    system,
-                    session,
-                    provider,
-                    include_messages=include_context,
-                )
-            else:
-                messages = [system, *session.messages]
+            with operation(emit, "context", f"context-{step}", step=step, strategy=session.context_mode) as context_payload:
+                if context_manager:
+                    extra = {"event_callback": lambda event: emit({**event, "step": step, "operation_id": f"context-{step}-{event['operation_id']}"})} if emit else {}
+                    messages, context_report = context_manager.prepare(
+                        system, session, provider, include_messages=include_context, **extra,
+                    )
+                else:
+                    messages = [system, *session.messages]
+                context_payload.update(context_report.model_dump(mode="json", exclude={"before_messages", "after_messages"}))
         except ContextManagementError as exc:
             return AgentResult(
                 answer=f"Context management failed: {exc}",
@@ -210,7 +239,12 @@ def run_agent(
                 context=context_report,
             )
         try:
-            turn = provider.chat(messages, tools=TOOLS)
+            with operation(emit, "model", f"model-{step}", step=step, model=getattr(provider, "model", None), message_count=len(messages), tool_count=len(TOOLS)) as model_payload:
+                extra = {"event_callback": lambda event: emit({**event, "step": step, "operation_id": f"model-{step}-{event['operation_id']}"})} if emit and isinstance(provider, GroqProvider) else {}
+                turn = provider.chat(messages, tools=TOOLS, **extra)
+                model_payload.update(content=turn.content, tool_calls=[call.model_dump(mode="json") for call in turn.tool_calls])
+                if not turn.tool_calls and not (turn.content or "").strip():
+                    model_payload["error"] = "The model returned no answer or tool calls."
         except Exception as exc:
             return AgentResult(
                 answer=f"The model request failed: {exc}",
@@ -220,27 +254,58 @@ def run_agent(
                 context=context_report,
             )
 
+        if not turn.tool_calls and not (turn.content or "").strip():
+            return AgentResult(
+                answer="The model returned no answer or tool calls. Please try again.",
+                status="error",
+                steps=step,
+                trace=trace,
+                context=context_report,
+            )
+
         session.messages.append(_assistant_message(turn))
         if not turn.tool_calls:
             return AgentResult(
-                answer=turn.content or "The model returned no answer.",
+                answer=turn.content,
                 status="ok",
                 steps=step,
                 trace=trace,
                 context=context_report,
             )
 
-        for call in turn.tool_calls:
-            content, event = _execute_tool(session, call, step)
+        for index, call in enumerate(turn.tool_calls):
+            with operation(emit, "tool", f"tool-{step}-{index}", step=step, tool_call_id=call.id, tool=call.name, raw_arguments=call.arguments) as tool_payload:
+                content, event = _execute_tool(session, call, step)
+                tool_payload.update(event.model_dump(mode="json"))
             trace.append(event)
             session.messages.append(
                 {"role": "tool", "tool_call_id": call.id, "content": content}
             )
 
     return AgentResult(
-        answer="Reached the maximum of 6 agent steps without a final answer.",
+        answer=f"Reached the maximum of {max_steps} agent steps without a final answer.",
         status="max_steps",
         steps=max_steps,
         trace=trace,
         context=context_report,
     )
+
+
+def run_agent(
+    session: Session,
+    user_question: str,
+    provider: ChatProvider,
+    context_manager: Any | None = None,
+    max_steps: int = 15,
+    include_context: bool = False,
+    event_callback: EventCallback | None = None,
+) -> AgentResult:
+    recorder = TraceRecorder(event_callback)
+    started = monotonic()
+    recorder.emit(dict(stage="prompt", state="completed", operation_id="prompt", payload={"question": user_question}))
+    result = _run_agent(session, user_question, provider, context_manager, max_steps, include_context,
+                        recorder.emit if event_callback else None)
+    recorder.emit(dict(stage="outcome", state="completed" if result.status == "ok" else "failed",
+                       operation_id="outcome", duration_ms=(monotonic() - started) * 1000,
+                       payload={"answer": result.answer, "status": result.status, "steps": result.steps}))
+    return result

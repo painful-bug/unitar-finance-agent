@@ -13,6 +13,8 @@ import type {
   ParseBudgetRulesInput,
   SessionInfo,
   UpdateChatThreadInput,
+  ExecutionTraceEvent,
+  TraceEnvelope,
 } from "../types";
 
 const EXPECTED_TOOLS = [
@@ -35,7 +37,7 @@ type ToolResult = {
 export type McpAdapter = {
   connect: () => Promise<void>;
   listTools: () => Promise<{ tools: Array<{ name: string }> }>;
-  callTool: (name: string, arguments_: Record<string, unknown>) => Promise<ToolResult>;
+  callTool: (name: string, arguments_: Record<string, unknown>, options?: { onprogress?: (progress: { message?: string }) => void; timeout?: number }) => Promise<ToolResult>;
   terminateSession: () => Promise<void>;
   close: () => Promise<void>;
 };
@@ -50,7 +52,7 @@ function createSdkAdapter(): McpAdapter {
   return {
     connect: () => client.connect(transport, { timeout: 10_000 }),
     listTools: () => client.listTools(),
-    callTool: (name, arguments_) => client.callTool({ name, arguments: arguments_ }),
+    callTool: (name, arguments_, options) => client.callTool({ name, arguments: arguments_ }, options),
     terminateSession: () => transport.terminateSession(),
     close: () => client.close(),
   };
@@ -58,6 +60,32 @@ function createSdkAdapter(): McpAdapter {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function isExecutionTraceEvent(value: unknown): value is ExecutionTraceEvent {
+  if (!isObject(value)) return false;
+  return Number.isSafeInteger(value.sequence) && Number(value.sequence) > 0 &&
+    typeof value.timestamp === "string" && Number.isFinite(Date.parse(value.timestamp)) &&
+    /(?:Z|\+00:00)$/.test(value.timestamp) &&
+    typeof value.operation_id === "string" && value.operation_id.length > 0 &&
+    ["prompt", "context", "model", "tool", "outcome"].includes(String(value.stage)) &&
+    ["started", "completed", "failed", "warning"].includes(String(value.state)) &&
+    (value.step == null || (Number.isSafeInteger(value.step) && Number(value.step) > 0)) &&
+    (value.tool_call_id == null || typeof value.tool_call_id === "string") &&
+    (value.duration_ms == null || (typeof value.duration_ms === "number" && Number.isFinite(value.duration_ms) && value.duration_ms >= 0)) &&
+    isObject(value.payload);
+}
+
+export function parseTraceEnvelope(message: string | undefined): TraceEnvelope | null {
+  if (!message) return null;
+  try {
+    const value: unknown = JSON.parse(message);
+    return isObject(value) && value.version === 1 &&
+      typeof value.thread_id === "string" && typeof value.turn_id === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.thread_id) &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.turn_id) &&
+      isExecutionTraceEvent(value.event) ? value as unknown as TraceEnvelope : null;
+  } catch { return null; }
 }
 
 function textContent(result: ToolResult): string {
@@ -109,6 +137,10 @@ function isSessionInfo(value: unknown): value is SessionInfo {
     Number.isInteger(value.compaction_turns) &&
     value.compaction_turns >= 5 &&
     value.compaction_turns <= 100 &&
+    typeof value.max_agent_steps === "number" &&
+    Number.isInteger(value.max_agent_steps) &&
+    value.max_agent_steps >= 1 &&
+    value.max_agent_steps <= 100 &&
     ["demo", "upload"].includes(String(value.ledger_source))
   );
 }
@@ -157,7 +189,12 @@ function isChatThreadDetail(value: unknown): value is ChatThreadDetail {
     typeof value.transaction_count === "number" &&
     Array.isArray(value.budget_rules) &&
     typeof value.compaction_turns === "number" &&
-    Array.isArray(value.turns)
+    typeof value.max_agent_steps === "number" &&
+    Array.isArray(value.turns) && value.turns.every((turn) => isObject(turn) &&
+      typeof turn.turn_id === "string" && typeof turn.question === "string" &&
+      typeof turn.created_at === "string" && ["pending", "complete", "interrupted"].includes(String(turn.state)) &&
+      (turn.execution_trace_version == null || turn.execution_trace_version === 1) &&
+      (turn.execution_trace === undefined || (Array.isArray(turn.execution_trace) && turn.execution_trace.every(isExecutionTraceEvent))))
   );
 }
 
@@ -207,8 +244,14 @@ export class FinanceMcpClient {
     return this.call("create_finance_session", input, isSessionInfo);
   }
 
-  askFinanceAgent(input: AskFinanceAgentInput): Promise<AgentResult> {
-    return this.call("ask_finance_agent", input, isAgentResult);
+  askFinanceAgent(input: AskFinanceAgentInput, onProgress?: (envelope: TraceEnvelope) => void): Promise<AgentResult> {
+    return this.call("ask_finance_agent", input, isAgentResult, {
+      timeout: 600_000,
+      onprogress: ({ message }) => {
+        const envelope = parseTraceEnvelope(message);
+        if (envelope?.thread_id === input.session_id) onProgress?.(envelope);
+      },
+    });
   }
 
   closeFinanceSession(input: CloseFinanceSessionInput): Promise<CloseResult> {
@@ -248,6 +291,7 @@ export class FinanceMcpClient {
     name: string,
     arguments_: object,
     guard: ObjectGuard<T>,
+    options?: Parameters<McpAdapter["callTool"]>[2],
   ): Promise<T> {
     await this.connect();
     const adapter = this.adapter;
@@ -255,7 +299,7 @@ export class FinanceMcpClient {
 
     let result: ToolResult;
     try {
-      result = await adapter.callTool(name, arguments_ as Record<string, unknown>);
+      result = await adapter.callTool(name, arguments_ as Record<string, unknown>, options);
     } catch (error) {
       await this.invalidate();
       throw clientError(error);

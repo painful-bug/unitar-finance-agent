@@ -10,7 +10,7 @@ function object(value: unknown): Record<string, unknown> | null {
 
 function text(value: unknown, fallback = "—"): string {
   if (value === null || value === undefined || value === "") return fallback;
-  return typeof value === "object" ? JSON.stringify(value) : String(value);
+  return Array.isArray(value) ? `${value.length} items` : typeof value === "object" ? `${Object.keys(value).length} fields` : String(value);
 }
 
 function money(value: unknown): string {
@@ -92,13 +92,13 @@ function LookupDetails({ result }: { result: Record<string, unknown> }) {
   );
 }
 
-export function ToolActivity({ event }: { event: TraceEvent }) {
+export function ToolActivity({ event, showTechnicalDetails = true }: { event: TraceEvent; showTechnicalDetails?: boolean }) {
   const args = event.arguments ?? {};
   const result = event.result ?? {};
   const failed = Boolean(event.error);
   let title = humanize(event.tool || "tool activity");
   let description = `Completed step ${event.step}.`;
-  let details = <Metrics values={Object.entries(result).slice(0, 6).map(([key, value]) => [humanize(key), text(value)])} />;
+  let details = <Metrics values={Object.entries(result).map(([key, value]) => [humanize(key), text(value)])} />;
 
   if (event.tool === "lookup_transactions") {
     const subject = text(args.category ?? args.kind, "ledger");
@@ -151,10 +151,10 @@ export function ToolActivity({ event }: { event: TraceEvent }) {
         </div>
       </div>
       {details}
-      <details className="tool-disclosure technical-details">
+      {showTechnicalDetails && <details className="tool-disclosure technical-details">
         <summary>Technical details</summary>
         <pre>{JSON.stringify({ arguments: event.arguments ?? null, result: event.result ?? null, error: event.error ?? null }, null, 2)}</pre>
-      </details>
+      </details>}
     </article>
   );
 }

@@ -14,6 +14,7 @@ interface ChatPanelProps {
   error: string;
   onPromptChange: (value: string) => void;
   onSubmit: () => void;
+  onViewTrace: (turnId: string | null) => void;
 }
 
 export function ChatPanel({
@@ -25,6 +26,7 @@ export function ChatPanel({
   error,
   onPromptChange,
   onSubmit,
+  onViewTrace,
 }: ChatPanelProps) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const end = useRef<HTMLDivElement>(null);
@@ -62,6 +64,7 @@ export function ChatPanel({
               <div className="turn" key={turn.turn_id}>
                 <article className="user-message" aria-label="user message">
                   <MarkdownContent content={turn.question} />
+                  <button className="view-trace-button" type="button" onClick={() => onViewTrace(turn.turn_id)}><span aria-hidden="true">◇</span> View trace</button>
                 </article>
                 {turn.state === "complete" && turn.result ? (
                   <article className="assistant-message" aria-label="assistant message">
@@ -87,7 +90,7 @@ export function ChatPanel({
             ))}
             {optimisticQuestion && !turns.some((turn) => turn.question === optimisticQuestion && turn.state === "pending") && (
               <div className="turn">
-                <article className="user-message" aria-label="user message"><MarkdownContent content={optimisticQuestion} /></article>
+                <article className="user-message" aria-label="user message"><MarkdownContent content={optimisticQuestion} /><button className="view-trace-button" type="button" onClick={() => onViewTrace(null)}><span aria-hidden="true">◇</span> View trace</button></article>
                 <p className="pending-response" role="status"><span className="loading-dot" aria-hidden="true" />{compacting ? "Compacting context…" : "Checking the ledger…"}</p>
               </div>
             )}

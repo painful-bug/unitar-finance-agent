@@ -10,6 +10,8 @@ export const RULE_EDITOR_VERSION = 1;
 export const RULE_PREFERENCES_KEY = "finance-agent.rule-preferences.v1";
 export const DEFAULT_COMPACTION_TURNS = 15;
 export const COMPACTION_TURNS_KEY = "finance-agent.compaction-turns.v1";
+export const DEFAULT_MAX_AGENT_STEPS = 15;
+export const MAX_AGENT_STEPS_KEY = "finance-agent.max-agent-steps.v1";
 export const THEME_KEY = "finance-agent.theme.v1";
 export type Theme = "light" | "dark";
 
@@ -114,6 +116,28 @@ export function saveCompactionTurns(
 ): void {
   try {
     storage?.setItem(COMPACTION_TURNS_KEY, JSON.stringify(turns));
+  } catch {
+    // Browser storage is optional; the active page state remains usable.
+  }
+}
+
+export function loadMaxAgentSteps(storage: Storage | null = storageOrNull()): number {
+  try {
+    const value: unknown = JSON.parse(storage?.getItem(MAX_AGENT_STEPS_KEY) ?? "null");
+    return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 100
+      ? value
+      : DEFAULT_MAX_AGENT_STEPS;
+  } catch {
+    return DEFAULT_MAX_AGENT_STEPS;
+  }
+}
+
+export function saveMaxAgentSteps(
+  steps: number,
+  storage: Storage | null = storageOrNull(),
+): void {
+  try {
+    storage?.setItem(MAX_AGENT_STEPS_KEY, JSON.stringify(steps));
   } catch {
     // Browser storage is optional; the active page state remains usable.
   }

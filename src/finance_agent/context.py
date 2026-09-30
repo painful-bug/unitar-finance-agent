@@ -11,6 +11,7 @@ from typesafe_sdk import Noul
 from .agent import ChatProvider, GroqProvider
 from .jev import JevClient
 from .models import ContextManagementError, ContextReport, Session
+from .tracing import MilestoneCallback, operation
 
 
 def estimate_tokens(messages: list[dict[str, Any]]) -> int:
@@ -162,6 +163,7 @@ class ContextManager:
         provider: ChatProvider,
         mode: str | None = None,
         include_messages: bool = False,
+        event_callback: MilestoneCallback | None = None,
     ) -> tuple[list[dict[str, Any]], ContextReport]:
         full = [system, *session.messages]
         before = estimate_tokens(full)
@@ -176,20 +178,27 @@ class ContextManager:
             )
 
         selected = mode or session.context_mode
+        def summarize(fallback_reason: str | None = None):
+            with operation(event_callback, "context", "summary", strategy="summary", fallback_reason=fallback_reason) as payload:
+                compacted, report = self._summarize(
+                    system, session, provider, before, fallback_reason=fallback_reason,
+                    include_messages=include_messages, event_callback=event_callback,
+                )
+                payload.update(report.model_dump(mode="json", exclude={"before_messages", "after_messages"}))
+                return compacted, report
+
         if selected == "summary":
             try:
-                return self._summarize(
-                    system, session, provider, before, include_messages=include_messages
-                )
+                return summarize()
             except Exception as exc:
                 raise ContextManagementError(f"Groq summary failed: {exc}") from exc
         if selected not in {"auto", "jev"}:
             raise ValueError(f"unknown context mode: {selected}")
 
         try:
-            compacted, report = self._compact_with_jev(
-                system, session, before, include_messages
-            )
+            with operation(event_callback, "context", "jev", strategy="jev") as payload:
+                compacted, report = self._compact_with_jev(system, session, before, include_messages)
+                payload.update(report.model_dump(mode="json", exclude={"before_messages", "after_messages"}))
             reduction = 1 - report.after_tokens / max(1, report.before_tokens)
             if reduction >= self.min_reduction:
                 return compacted, report
@@ -198,15 +207,11 @@ class ContextManager:
             if selected == "jev":
                 raise ContextManagementError(f"Jev compaction failed: {exc}") from exc
             reason = str(exc)
+        if event_callback:
+            event_callback(dict(stage="context", state="warning", operation_id="fallback",
+                                payload={"message": "Falling back to summary compaction.", "fallback_reason": reason}))
         try:
-            return self._summarize(
-                system,
-                session,
-                provider,
-                before,
-                fallback_reason=reason,
-                include_messages=include_messages,
-            )
+            return summarize(reason)
         except Exception as exc:
             raise ContextManagementError(
                 f"Jev failed ({reason}); Groq summary failed ({exc})"
@@ -245,6 +250,7 @@ class ContextManager:
         before: int,
         fallback_reason: str | None = None,
         include_messages: bool = False,
+        event_callback: MilestoneCallback | None = None,
     ) -> tuple[list[dict[str, Any]], ContextReport]:
         desired = max(0, len(session.messages) - self.preserve_recent)
         cut = _safe_prefix_cut(session.messages, desired)
@@ -259,14 +265,17 @@ class ContextManager:
         )
         summary_model = os.getenv("GROQ_SUMMARY_MODEL")
         summary_provider = GroqProvider(summary_model) if summary_model else provider
-        turn = summary_provider.chat(
-            [
-                {"role": "system", "content": "You produce concise, factual conversation summaries."},
-                {"role": "user", "content": prompt},
-            ]
-        )
-        if not turn.content:
-            raise ValueError("summary model returned no content")
+        with operation(event_callback, "model", "summary-model", model=getattr(summary_provider, "model", None), message_count=2, tool_count=0) as payload:
+            extra = {"event_callback": lambda event: event_callback({**event, "operation_id": f"summary-{event['operation_id']}"})} if event_callback and isinstance(summary_provider, GroqProvider) else {}
+            turn = summary_provider.chat(
+                [
+                    {"role": "system", "content": "You produce concise, factual conversation summaries."},
+                    {"role": "user", "content": prompt},
+                ], **extra,
+            )
+            payload["content"] = turn.content
+            if not turn.content:
+                raise ValueError("summary model returned no content")
         compacted = [
             system,
             {"role": "system", "content": f"Lossy summary of earlier session history:\n{turn.content}"},

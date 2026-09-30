@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .budget import BudgetRule
-from .models import AgentResult
+from .models import AgentResult, ExecutionTraceEvent
 
 
 ContextMode = Literal["auto", "jev", "summary"]
@@ -37,6 +37,8 @@ class ChatTurn(BaseModel):
     question: str
     state: TurnState = "pending"
     result: AgentResult | None = None
+    execution_trace_version: Literal[1] | None = None
+    execution_trace: list[ExecutionTraceEvent] = Field(default_factory=list)
 
     @field_validator("turn_id")
     @classmethod
@@ -65,6 +67,7 @@ class ChatThreadRecord(BaseModel):
     transaction_count: int
     budget_rules: list[BudgetRule]
     compaction_turns: int = Field(ge=5, le=100)
+    max_agent_steps: int = Field(default=15, ge=1, le=100)
     messages: list[dict[str, Any]] = Field(default_factory=list)
     turns: list[ChatTurn] = Field(default_factory=list)
 
@@ -110,6 +113,7 @@ class ChatThreadDetail(BaseModel):
     transaction_count: int
     budget_rules: list[BudgetRule]
     compaction_turns: int
+    max_agent_steps: int
     turns: list[ChatTurn]
 
 
@@ -138,6 +142,7 @@ def thread_detail(record: ChatThreadRecord) -> ChatThreadDetail:
         transaction_count=record.transaction_count,
         budget_rules=record.budget_rules,
         compaction_turns=record.compaction_turns,
+        max_agent_steps=record.max_agent_steps,
         turns=record.turns,
     )
 
