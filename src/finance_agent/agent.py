@@ -93,9 +93,10 @@ def _groq_schema(model: type[BaseModel]) -> dict[str, Any]:
 
 
 class GroqProvider:
-    def __init__(self, model: str | None = None, client: Groq | None = None):
+    def __init__(self, model: str | None = None, client: Groq | None = None, temperature: float | None = None):
         self.model = model or os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
         self.client = client or Groq(api_key=os.getenv("GROQ_API_KEY"))
+        self.temperature = temperature
 
     def chat(
         self,
@@ -105,6 +106,8 @@ class GroqProvider:
         event_callback: MilestoneCallback | None = None,
     ) -> AssistantTurn:
         kwargs: dict[str, Any] = {"model": self.model, "messages": messages}
+        if self.temperature is not None:
+            kwargs["temperature"] = self.temperature
         if tools:
             kwargs.update(tools=tools, tool_choice="auto")
         if response_model:
@@ -213,6 +216,7 @@ def _run_agent(
     max_steps: int = 15,
     include_context: bool = False,
     emit: MilestoneCallback | None = None,
+    system_prompt: str | None = None,
 ) -> AgentResult:
     session.messages.append({"role": "user", "content": user_question})
     trace: list[TraceEvent] = []
@@ -220,6 +224,8 @@ def _run_agent(
 
     for step in range(1, max_steps + 1):
         system = {"role": "system", "content": _system_prompt(session)}
+        if system_prompt:
+            system["content"] += "\n\n" + system_prompt
         try:
             with operation(emit, "context", f"context-{step}", step=step, strategy=session.context_mode) as context_payload:
                 if context_manager:
@@ -299,12 +305,14 @@ def run_agent(
     max_steps: int = 15,
     include_context: bool = False,
     event_callback: EventCallback | None = None,
+    system_prompt: str | None = None,
 ) -> AgentResult:
+    """Run the finance loop; optional instructions follow the standard tool prompt."""
     recorder = TraceRecorder(event_callback)
     started = monotonic()
     recorder.emit(dict(stage="prompt", state="completed", operation_id="prompt", payload={"question": user_question}))
     result = _run_agent(session, user_question, provider, context_manager, max_steps, include_context,
-                        recorder.emit if event_callback else None)
+                        recorder.emit if event_callback else None, system_prompt)
     recorder.emit(dict(stage="outcome", state="completed" if result.status == "ok" else "failed",
                        operation_id="outcome", duration_ms=(monotonic() - started) * 1000,
                        payload={"answer": result.answer, "status": result.status, "steps": result.steps}))

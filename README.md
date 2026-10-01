@@ -120,10 +120,9 @@ The top-right theme control follows the operating-system theme on first use, the
 ```bash
 uv run --extra dev --extra eval pytest
 uv run --extra eval --env-file .env python tools/run_evaluation.py
-uv run --extra eval --env-file .env python tools/run_evaluation.py --repeats 1
 ```
 
-Each evaluation compares two direct finance prompts over three fresh repetitions, using twelve questions with keyword OR LLM-judge checks. It prints questions, answers, verdicts, and reasoning, then saves `report.md` and `results.json` in a new timestamped directory under `evals/results/`. The report includes per-run and aggregate rates plus the observed range. Use `--repeats 1` for a shorter live demo. Only `GROQ_API_KEY` is required; evaluation is independent of app Settings and Jev. See [the evaluation operating guide](docs/evaluation-guide.md) and [the verified evaluation report](docs/evaluation-report.md).
+Each evaluation compares the real finance agent under two system prompts, once per prompt, using twelve questions with keyword OR LLM-judge checks. All three finance tools are available in each fresh session. It prints questions, tool calls and results, answers, verdicts, and reasoning, then saves `report.md` and `results.json` in a new timestamped directory under `evals/results/`. The concise report shows pass rates, a measured winner or tie, and each case’s verdict. Both prompts use the bundled CSV and the same budget rules; no reference answers are sent to the agent. Only `GROQ_API_KEY` is required; evaluation is independent of app Settings and Jev. See [the evaluation operating guide](docs/evaluation-guide.md) and [the verified evaluation report](docs/evaluation-report.md).
 
 CI runs the Python suite and package build, frontend lint/typecheck/unit/build checks, Playwright against a deterministic MCP fixture, and both container builds. It does not publish images or require provider credentials.
 

@@ -169,7 +169,7 @@ The current direct dependencies are Groq, MCP, Pydantic, Streamlit, and TypeSafe
 | Jev | Generic decisions, Noul extraction, missing-answer validation | [`tests/test_jev.py`](../../tests/test_jev.py) |
 | MCP | Exact tools, structured outputs, lifecycle, custom-rule confirmation | [`tests/test_server.py`](../../tests/test_server.py) |
 | Streamlit UI | Rule persistence, navigation, stale-server error, context rendering, live-context reruns | [`tests/test_ui.py`](../../tests/test_ui.py) |
-| Evaluation | Twelve-case direct prompt A/B comparison with literal checks, an LLM judge, and repeated-run stability reporting | [`tests/test_evaluation.py`](../../tests/test_evaluation.py), [`evals/golden.json`](../../evals/golden.json) |
+| Evaluation | Twelve-case finance-agent prompt A/B comparison with all three finance tools, literal checks, an LLM judge, and a concise single-pass comparison | [`tests/test_evaluation.py`](../../tests/test_evaluation.py), [`evals/golden.json`](../../evals/golden.json) |
 
 The existing suite contains 30 tests and passed before this plan was written. Live-provider evaluation still requires real credentials because the runner rejects execution without `GROQ_API_KEY` ([`src/finance_agent/evaluation.py:63-65`](../../src/finance_agent/evaluation.py#L63-L65)).
 

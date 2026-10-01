@@ -286,4 +286,4 @@ type UpdateAppSettingsInput = Partial<Omit<AppSettings, "version">> & { reset_ru
 
 ## Evaluation is independent of Settings
 
-The prompt evaluation script uses a normal LLM judge and no longer exposes an `evaluation_judge` setting in `get_app_settings` or `update_app_settings`. Existing saved app settings and per-turn chat snapshots silently discard this retired field during validation; other unknown fields remain rejected. Restart the backend after upgrading to refresh its MCP schema. Context strategy settings, including Jev, remain available for ordinary conversations. See [the evaluation guide](../evaluation-guide.md).
+The agent prompt evaluation script uses a normal LLM judge and no longer exposes an `evaluation_judge` setting in `get_app_settings` or `update_app_settings`. Existing saved app settings and per-turn chat snapshots silently discard this retired field during validation; other unknown fields remain rejected. Restart the backend after upgrading to refresh its MCP schema. Context strategy settings, including Jev, remain available for ordinary conversations. See [the evaluation guide](../evaluation-guide.md).
