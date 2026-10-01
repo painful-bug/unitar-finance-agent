@@ -91,7 +91,7 @@ export function ChatPanel({
                 ) : turn.state === "interrupted" ? (
                   <p className="turn-error" role="status">The previous response was interrupted. You can send the question again.</p>
                 ) : (
-                  <p className="pending-response" role="status"><span className="loading-dot" aria-hidden="true" />Thinking…</p>
+                  <p className="pending-response" role="status"><span className="loading-dot" aria-hidden="true" />{compacting ? "Compacting context…" : "Thinking…"}</p>
                 )}
                 {ledgerMarkers(index + 1)}
               </div>

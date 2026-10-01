@@ -154,6 +154,31 @@ describe("persistent chat shell", () => {
     expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled(); // Empty composer, request finished.
     expect(client.getChatThread).toHaveBeenCalledTimes(2);
   });
+
+  it("keeps the compaction indicator after the pending turn arrives", async () => {
+    window.history.replaceState({}, "", `/chat/${THREAD_ID}`);
+    const thread = detail();
+    thread.turns = Array.from({ length: 4 }, (_, index) => ({ ...thread.turns[0], turn_id: `turn-${index}`, question: `Question ${index + 1}` }));
+    const client = mockClient([thread]);
+    await client.updateAppSettings({ compaction_turns: 5 });
+    let progress!: (envelope: TraceEnvelope) => void;
+    client.askFinanceAgent.mockImplementation((_input, callback) => {
+      progress = callback!;
+      return new Promise(() => undefined);
+    });
+    render(<App client={client} />);
+    await screen.findByRole("heading", { name: "August review" });
+    fireEvent.change(screen.getByLabelText("Ask about your spending, budget, or savings"), { target: { value: "Compact these turns" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(client.askFinanceAgent).toHaveBeenCalledOnce());
+
+    act(() => progress({ version: 1, thread_id: THREAD_ID, turn_id: SECOND_ID, event: {
+      sequence: 1, timestamp: "2026-09-30T08:00:00Z", operation_id: "prompt", stage: "prompt", state: "completed", payload: { question: "Compact these turns" },
+    } }));
+    expect(screen.getByRole("region", { name: "Conversation" })).toHaveTextContent("Compacting context…");
+    expect(screen.getByRole("region", { name: "Conversation" })).not.toHaveTextContent("Thinking…");
+  });
+
   it("renders a full-screen new-chat state and saved history", async () => {
     const client = mockClient([detail()]);
     render(<App client={client} />);
