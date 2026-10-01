@@ -321,6 +321,19 @@ describe("shared settings and chat ledgers", () => {
     expect(screen.getByText("Savings are RM200.")).toBeInTheDocument();
   });
 
+  it("shows a rule parsing failure without replacing confirmed rules", async () => {
+    const client = mockClient();
+    client.parseBudgetRules.mockRejectedValue(new Error("Groq output_parse_failed"));
+    render(<App client={client} />);
+    await screen.findByText("Agent service connected");
+    fireEvent.click(screen.getAllByRole("button", { name: "Settings" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Parse rules" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Groq output_parse_failed");
+    expect(screen.queryByRole("button", { name: "Confirm these rules" })).not.toBeInTheDocument();
+    expect(client.updateAppSettings).not.toHaveBeenCalled();
+    expect(screen.getByText("These rules are active for every chat.")).toBeInTheDocument();
+  });
+
   it("preserves the composer and confirms global rules without creating a chat", async () => {
     const client = mockClient();
     client.parseBudgetRules.mockResolvedValue({ rules: [{ rule_id: "new_rule", source_text: "Save 25%", supported: true }] });
@@ -338,6 +351,45 @@ describe("shared settings and chat ledgers", () => {
     expect(client.createFinanceSession).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
     expect(screen.getByLabelText("Ask about your spending, budget, or savings")).toHaveValue("Keep my draft");
+  });
+
+  it("acknowledges confirmation of unchanged rules and dismisses the preview only after saving", async () => {
+    const client = mockClient();
+    const rules = [{ rule_id: "savings", source_text: "Save 20%", supported: true }];
+    client.parseBudgetRules.mockResolvedValue({ rules });
+    let finish!: (settings: AppSettings) => void;
+    client.updateAppSettings.mockImplementationOnce(() => new Promise<AppSettings>((resolve) => { finish = resolve; }));
+    render(<App client={client} />);
+    await screen.findByText("Agent service connected");
+    fireEvent.click(screen.getAllByRole("button", { name: "Settings" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Parse rules" }));
+    await screen.findByRole("heading", { name: "Compiled preview" });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm these rules" }));
+    await waitFor(() => expect(client.updateAppSettings).toHaveBeenCalledWith({ rules_draft: "Save 20%", rules_text: "Save 20%", budget_rules: rules }));
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    expect(screen.getByRole("heading", { name: "Compiled preview" })).toBeInTheDocument();
+    finish({ ...await client.getAppSettings(), budget_rules: rules });
+    expect(await screen.findByText("Rules confirmed and saved for every chat.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Compiled preview" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm these rules" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a failed confirmation retryable without claiming success", async () => {
+    const client = mockClient();
+    client.parseBudgetRules.mockResolvedValue({ rules: [{ rule_id: "savings", source_text: "Save 20%", supported: true }] });
+    client.updateAppSettings.mockRejectedValueOnce(new Error("Could not write settings"));
+    render(<App client={client} />);
+    await screen.findByText("Agent service connected");
+    fireEvent.click(screen.getAllByRole("button", { name: "Settings" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Parse rules" }));
+    await screen.findByRole("heading", { name: "Compiled preview" });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm these rules" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not write settings");
+    expect(screen.queryByText("Rules confirmed and saved for every chat.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm these rules" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm these rules" }));
+    expect(await screen.findByText("Rules confirmed and saved for every chat.")).toBeInTheDocument();
+    expect(client.updateAppSettings).toHaveBeenCalledTimes(2);
   });
 
   it("keeps milestones while settings is open during an answer", async () => {

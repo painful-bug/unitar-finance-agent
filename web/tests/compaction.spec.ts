@@ -20,12 +20,12 @@ test("compacts completed turns once and persists the exact model input", async (
   expect(saved.result.context.strategy).toBe("summary");
   expect(saved.execution_trace.filter((event: { operation_id: string; state: string }) => event.operation_id.endsWith("-summary-model") && event.state === "started")).toHaveLength(1);
   const modelInput = saved.result.context.after_messages;
-  expect(modelInput[1].role).toBe("assistant");
+  expect(modelInput[1].role).toBe("system");
   expect(modelInput.some((message: { content: string }) => message.content === "Compaction regression request 5")).toBe(true);
   expect(modelInput.at(-1).role).toBe("tool");
   await page.getByRole("button", { name: "Close trace" }).click();
   await page.getByRole("button", { name: "Context", exact: true }).click();
-  await expect(page.locator("#live-context").getByRole("heading", { name: "Summary compaction" })).toBeVisible();
+  await expect(page.locator("#live-context").getByRole("heading", { name: "summary", exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "Model input" }).click();
   await expect(page.locator("#live-context .is-summary")).toBeVisible();
   await page.screenshot({ path: "/tmp/finance-compaction-fixed.png", fullPage: true });

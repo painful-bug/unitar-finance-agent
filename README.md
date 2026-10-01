@@ -95,7 +95,7 @@ Saved routes use `/chat/<thread-id>`, so refreshing or reopening a URL restores 
 
 The canonical history is never overwritten, so a running session can switch modes. If both strategies fail, the request returns an error rather than sending uncontrolled context.
 
-The React product triggers compaction after 15 user turns (configurable from 5 to 100 in **Settings**) or an estimated 8,000 tokens, whichever comes first. Settings are saved on the backend and apply to existing and new chats. From either threshold onward, every model request receives a freshly prepared compacted copy.
+The React product triggers compaction after 15 user turns (configurable from 5 to 100 in **Settings**) or an estimated 8,000 tokens, whichever comes first. Settings are saved on the backend and apply to existing and new chats. Compaction prepares a copy of the history once per answer; subsequent tool steps reuse that copy with their new calls and results. The saved history remains intact.
 
 ## Natural-language budget rules
 

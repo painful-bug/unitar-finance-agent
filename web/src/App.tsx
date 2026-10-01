@@ -106,6 +106,7 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
 
   const [parsedRules, setParsedRules] = useState<BudgetRule[] | null>(null);
   const [parsedText, setParsedText] = useState("");
+  const [rulesConfirmation, setRulesConfirmation] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
   const [rulesError, setRulesError] = useState("");
@@ -297,6 +298,7 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
 
   const updateRulesText = (text: string) => {
     ruleInputRevision.current += 1;
+    setRulesConfirmation("");
     setRulesText(text);
   };
 
@@ -304,6 +306,7 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
     const revision = ruleInputRevision.current;
     setParsing(true);
     setRulesError("");
+    setRulesConfirmation("");
     try {
       const preview = await client.parseBudgetRules({ rules_text: rulesText, csv_text: upload?.text });
       if (revision !== ruleInputRevision.current) return;
@@ -317,7 +320,13 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
 
   const confirmRules = async () => {
     if (!parsedRules?.length || parsedText !== rulesText) return;
-    await saveSettings({ rules_draft: rulesText, rules_text: rulesText, budget_rules: parsedRules });
+    const revision = ruleInputRevision.current;
+    const saved = await saveSettings({ rules_draft: rulesText, rules_text: rulesText, budget_rules: parsedRules });
+    if (saved && revision === ruleInputRevision.current) {
+      setParsedRules(null);
+      setWarnings([]);
+      setRulesConfirmation("Rules confirmed and saved for every chat.");
+    }
   };
 
   const resetRules = async () => {
@@ -610,6 +619,7 @@ export default function App({ client: suppliedClient }: AppProps = {}) {
           onSaveDraft={() => { if (rulesText !== appSettings?.rules_draft) void saveSettings({ rules_draft: rulesText }); }}
           onSave={(input) => void saveSettings(input)}
           parsedRules={parsedRules}
+          confirmation={rulesConfirmation}
           warnings={warnings}
           previewCurrent={Boolean(parsedRules && parsedText === rulesText)}
           parsing={parsing}

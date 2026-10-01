@@ -1,9 +1,13 @@
+import copy
 from datetime import date
 from types import SimpleNamespace
 
+import httpx
 import pytest
+from groq import BadRequestError
 
 from finance_agent.agent import AssistantTurn, GroqProvider, ToolCall, run_agent
+from finance_agent.context import ContextManager
 from finance_agent.finance import FinanceData, load_csv
 from finance_agent.models import Session
 
@@ -183,3 +187,83 @@ def test_groq_repeated_empty_response_is_bounded_and_keeps_tool_trace() -> None:
     assert "finish_reason=length" in result.answer
     assert result.trace[0].result["total"] == "5000.00"
     assert current.messages[-1]["role"] == "tool"
+
+
+@pytest.mark.parametrize("code,failures,expected_calls", [
+    ("output_parse_failed", 1, 2),
+    ("output_parse_failed", 2, 2),
+    ("invalid_request_error", 1, 1),
+])
+def test_groq_parse_error_recovery_is_specific_and_bounded(code, failures, expected_calls):
+    requests, events = [], []
+    error = BadRequestError("Parsing failed", response=httpx.Response(
+        400, request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+    ), body={"error": {"code": code, "failed_generation": ""}})
+
+    def create(**kwargs):
+        requests.append(kwargs)
+        if len(requests) <= failures:
+            raise error
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
+            content="Recovered answer", tool_calls=[]
+        ))])
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    messages = [{"role": "user", "content": "Summarize expenses"}]
+    provider = GroqProvider(client=client)
+    if code == "output_parse_failed" and failures == 1:
+        assert provider.chat(messages, event_callback=events.append).content == "Recovered answer"
+        assert any(event["state"] == "warning" for event in events)
+        assert any(event["state"] == "completed" for event in events)
+    else:
+        with pytest.raises(BadRequestError) as raised:
+            provider.chat(messages, event_callback=events.append)
+        assert raised.value is error
+    assert len(requests) == expected_calls
+    assert messages == [{"role": "user", "content": "Summarize expenses"}]
+    assert all(request["messages"] == messages for request in requests)
+
+
+@pytest.mark.parametrize("first", ["empty", "parse"])
+def test_groq_empty_and_parse_failures_share_one_retry(first):
+    requests = []
+    error = BadRequestError("Parsing failed", response=httpx.Response(400, request=httpx.Request("POST", "https://api.groq.com")),
+                            body={"code": "output_parse_failed"})
+    def create(**kwargs):
+        requests.append(kwargs)
+        if (len(requests) == 1) == (first == "parse"):
+            raise error
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="", tool_calls=[]), finish_reason="stop")])
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    with pytest.raises((BadRequestError, ValueError)):
+        GroqProvider(client=client).chat([{"role": "user", "content": "Hello"}])
+    assert len(requests) == 2
+
+
+def test_agent_reuses_compacted_context_across_tool_steps_without_changing_history():
+    current = session()
+    current.context_mode = "summary"
+    current.compaction_turns = 5
+    current.messages = [message for _ in range(4) for message in [
+        {"role": "user", "content": "Earlier question"},
+        {"role": "assistant", "content": "Earlier answer"},
+    ]]
+    original = copy.deepcopy(current.messages)
+    class Provider:
+        summaries = 0
+        inputs = []
+        def chat(self, messages, tools=None, response_model=None):
+            if not tools:
+                self.summaries += 1
+                return AssistantTurn(content="Earlier questions answered.")
+            self.inputs.append(copy.deepcopy(messages))
+            if len(self.inputs) < 3:
+                return AssistantTurn(tool_calls=[ToolCall(id=f"lookup-{len(self.inputs)}", name="lookup_transactions", arguments='{"month":"2026-07"}')])
+            return AssistantTurn(content="Done")
+    provider = Provider()
+    result = run_agent(current, "Current question", provider, ContextManager(trigger_tokens=None, preserve_recent=2), include_context=True)
+    assert result.status == "ok" and provider.summaries == 1
+    assert current.messages[:len(original)] == original
+    assert result.context.after_messages == provider.inputs[-1]
+    assert len([m for m in provider.inputs[-1] if m["role"] == "tool"]) == 2
+    assert sum((m.get("content") or "").startswith("Lossy summary") for m in provider.inputs[-1]) == 1

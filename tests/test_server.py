@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from mcp import Client
 
-from finance_agent.agent import AssistantTurn, ToolCall
+from finance_agent.agent import AssistantTurn, GroqProvider, ToolCall
 from finance_agent.budget import BudgetRule, Operand, default_budget_rules
 from finance_agent.context import ContextManager
 from finance_agent.server import SessionStore, build_server
@@ -200,6 +200,52 @@ def test_mcp_rule_preview_can_be_confirmed_into_a_session() -> None:
                 rule["rule_id"] for rule in custom_only.structured_content["budget_rules"]
             ] == ["savings_target"]
 
+    asyncio.run(scenario())
+
+
+def test_parse_existing_rules_then_chat_recovers_provider_parse_failure(tmp_path):
+    import copy
+    from types import SimpleNamespace
+
+    import httpx
+    from groq import BadRequestError
+
+    requests = []
+    def create(**kwargs):
+        requests.append(copy.deepcopy(kwargs))
+        if "response_format" in kwargs:
+            message = SimpleNamespace(content=json.dumps({"rules": [r.model_dump(mode="json") for r in default_budget_rules()]}), tool_calls=[])
+        elif kwargs["messages"][-1]["role"] != "tool":
+            message = SimpleNamespace(content=None, tool_calls=[SimpleNamespace(id="groceries", function=SimpleNamespace(
+                name="lookup_transactions", arguments='{"month":"2026-07","category":"groceries","kind":"expense"}'
+            ))])
+        elif len(requests) == 3:
+            raise BadRequestError("Parsing failed", response=httpx.Response(400, request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")),
+                                  body={"error": {"code": "output_parse_failed", "failed_generation": ""}})
+        else:
+            message = SimpleNamespace(content="July groceries were RM690.65.", tool_calls=[])
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    async def scenario():
+        provider = GroqProvider(client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
+        store = SessionStore(provider=provider, chat_store=ChatStore(tmp_path))
+        async with Client(build_server(store)) as client:
+            created = await client.call_tool("create_finance_session", {})
+            session_id = created.structured_content["session_id"]
+            before = store.get_app_settings()
+            preview = await client.call_tool("parse_budget_rules", {"rules_text": before.rules_text})
+            assert not preview.is_error and preview.structured_content["warnings"] == []
+            assert store.get_app_settings() == before
+            assert store.sessions[session_id].messages == []
+            result = await client.call_tool("ask_finance_agent", {"session_id": session_id, "question": "July groceries?"})
+            assert result.structured_content["status"] == "ok"
+            assert result.structured_content["trace"][0]["result"]["total"] == "690.65"
+            assert requests[2] == requests[3]
+            assert "response_format" not in requests[2]
+            saved = store.chat_store.load(session_id)
+            assert saved.turns[0].result.status == "ok"
+            assert any(e.state == "warning" and e.payload.get("error_code") == "output_parse_failed" for e in saved.turns[0].execution_trace)
+            assert [m["role"] for m in saved.messages] == ["user", "assistant", "tool", "assistant"]
     asyncio.run(scenario())
 
 

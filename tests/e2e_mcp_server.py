@@ -16,7 +16,7 @@ from finance_agent.server import SessionStore, build_server
 from finance_agent.threads import ChatStore
 
 
-DEFAULT_RULES_TEXT = ", ".join(rule.source_text for rule in default_budget_rules())
+DEFAULT_RULES_TEXT = "\n".join(rule.source_text for rule in default_budget_rules())
 
 
 class DeterministicProvider:
@@ -44,12 +44,20 @@ class DeterministicProvider:
                 content=json.dumps({"rules": [rule.model_dump(mode="json") for rule in rules]})
             )
 
+        if not tools:
+            return AssistantTurn(content="Earlier finance questions were answered from the ledger tools.")
+
         question = next((message.get("content", "") for message in reversed(messages) if message["role"] == "user"), "")
         if "Trace slowly" in question:
             time.sleep(1.5)  # Expose running stages to browser tests before each deterministic response.
         if messages[-1]["role"] == "tool":
             return AssistantTurn(content="Deterministic finance answer from the active ledger.")
         self.tool_calls += 1
+        if "Check savings target" in question:
+            return AssistantTurn(tool_calls=[ToolCall(
+                id=f"deterministic-budget-{self.tool_calls}", name="check_budget_rule",
+                arguments='{"rule_id":"savings_target","month":"2026-07"}',
+            )])
         return AssistantTurn(
             tool_calls=[
                 ToolCall(

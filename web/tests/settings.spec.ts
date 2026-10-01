@@ -1,5 +1,21 @@
 import { expect, test } from "@playwright/test";
 
+test("acknowledges confirmation of existing default rules and restores them after reload", async ({ page }) => {
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Use defaults" }).click();
+  await expect(page.getByText("All changes saved")).toBeVisible();
+  const text = await page.getByLabel("Natural-language rules").inputValue();
+  await page.getByRole("button", { name: "Parse rules" }).click();
+  await expect(page.getByRole("heading", { name: "Compiled preview" })).toBeVisible();
+  await page.getByRole("button", { name: "Confirm these rules" }).click();
+  await expect(page.getByText("Rules confirmed and saved for every chat.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Compiled preview" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Confirm these rules" })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByLabel("Natural-language rules")).toHaveValue(text);
+  await expect(page.locator(".active-rules .rule-list article")).toHaveCount(3);
+});
+
 const ledger = (name: string, amount: number, date = "2026-08-30") => ({ name, mimeType: "text/csv", buffer: Buffer.from(`date,kind,category,amount\n${date},income,salary,${amount}\n2026-08-01,expense,dining,200\n`) });
 
 test("uploads, replaces, and resets ledgers without losing visible history", async ({ page }) => {

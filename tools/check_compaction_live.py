@@ -11,6 +11,7 @@ import json
 from datetime import date
 from importlib.resources import files
 from pathlib import Path
+from time import sleep
 
 from finance_agent.agent import AssistantTurn, GroqProvider, ToolCall, _assistant_message, _execute_tool, run_agent
 from finance_agent.context import ContextManager
@@ -40,6 +41,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--modes", nargs="+", choices=("auto", "jev", "summary"), default=["auto", "jev", "summary"])
     parser.add_argument("--temperature", type=float, default=None, help="Omit to use the application's provider default")
+    parser.add_argument("--pause-seconds", type=float, default=0, help="Pause between scenarios to respect provider token limits")
     args = parser.parse_args()
     evidence = []
     with GroqProvider().client as client:
@@ -52,6 +54,8 @@ def main():
                 "What were my June and July 2026 grocery expenses, and was each month within my grocery budget? Verify both months with the ledger tools.",
             ]
             for index, question in enumerate(questions):
+                if args.pause_seconds:
+                    sleep(args.pause_seconds)
                 print(f"Checking {mode}: {question}", flush=True)
                 original = copy.deepcopy(session.messages)
                 events = []

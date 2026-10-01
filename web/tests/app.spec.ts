@@ -1,5 +1,26 @@
 import { expect, test } from "@playwright/test";
 
+test("uses a newly parsed and confirmed rule in a budget tool", async ({ page }) => {
+  await page.goto("/settings");
+  await page.getByLabel("Natural-language rules").fill("Save at least 25% of income.");
+  await page.getByRole("button", { name: "Parse rules" }).click();
+  await expect(page.getByRole("heading", { name: "Compiled preview" })).toBeVisible();
+  await page.getByRole("button", { name: "Confirm these rules" }).click();
+  await expect(page.getByText("These rules are active for every chat.")).toBeVisible();
+  await page.getByRole("button", { name: "Back to chat" }).click();
+  await page.getByLabel("Ask about your spending, budget, or savings").fill("Check savings target for July");
+  await page.getByRole("button", { name: "Send message" }).click();
+  const transcript = page.getByRole("region", { name: "Conversation" });
+  await expect(transcript.getByText("Deterministic finance answer from the active ledger.")).toBeVisible();
+  await transcript.getByRole("button", { name: "View trace" }).last().click();
+  const trace = page.locator("#agent-trace");
+  await trace.getByRole("button", { name: "Raw JSON" }).click();
+  const [saved] = JSON.parse(await trace.locator("pre").innerText());
+  expect(saved.result.status).toBe("ok");
+  expect(saved.result.trace[0].tool).toBe("check_budget_rule");
+  expect(saved.result.trace[0].result).toMatchObject({ rule_id: "savings_target", limit: "1250.00", compliant: true });
+});
+
 
 test("persists a configured chat across reload and renders readable tool activity", async ({ page }) => {
   await page.goto("/");

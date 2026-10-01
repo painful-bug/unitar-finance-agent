@@ -10,6 +10,7 @@ interface SettingsPanelProps {
   onSaveDraft: () => void;
   onSave: (input: UpdateAppSettingsInput) => void;
   parsedRules: BudgetRule[] | null;
+  confirmation: string;
   warnings: string[];
   previewCurrent: boolean;
   parsing: boolean;
@@ -76,11 +77,12 @@ export function SettingsPanel(props: SettingsPanelProps) {
             <p className="field-help">Preview the compiled rules, then confirm to apply them. Editing a draft keeps your active rules in place.</p>
           </div>
           <div className="button-row"><button className="primary-button" type="button" disabled={props.parsing || !props.rulesText.trim()} onClick={props.onParse}>{props.parsing ? "Parsing…" : "Parse rules"}</button><button className="secondary-button" type="button" onClick={props.onReset}>Use defaults</button></div>
+          {props.confirmation && <p className="field-help" role="status">{props.confirmation}</p>}
           {props.parsedRules && props.previewCurrent && <div className="rule-preview">
             <h3>Compiled preview</h3><RuleList rules={props.parsedRules} />
             {props.warnings.map((warning) => <div className="settings-warning" key={warning}><MarkdownContent content={warning} /></div>)}
             <details className="tool-disclosure technical-details"><summary>Technical details</summary><pre>{JSON.stringify(props.parsedRules, null, 2)}</pre></details>
-            <button className="primary-button" type="button" disabled={!props.parsedRules.length || props.saveStatus === "saving"} onClick={props.onConfirm}>Confirm these rules</button>
+            <button className="primary-button" type="button" disabled={!props.parsedRules.length || props.saveStatus === "saving"} onClick={props.onConfirm}>{props.saveStatus === "saving" ? "Saving…" : "Confirm these rules"}</button>
           </div>}
           {props.parsedRules && !props.previewCurrent && <p className="settings-warning">Your draft changed. Parse it again before confirming.</p>}
           <div className="active-rules"><div className="active-rules-heading"><h3>Active rules</h3><span className="settings-badge">{settings.budget_rules.length} rules</span></div>

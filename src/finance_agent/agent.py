@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
+from contextlib import nullcontext
 from time import monotonic
 from typing import Any, Literal, Protocol
 
-from groq import Groq
+from groq import BadRequestError, Groq
 from pydantic import BaseModel, Field, ValidationError
 
 from .models import AgentResult, ContextManagementError, ContextReport, Session, TraceEvent
@@ -112,6 +114,8 @@ class GroqProvider:
             kwargs.update(tools=tools, tool_choice="auto")
         if response_model:
             kwargs["temperature"] = 0
+            # Groq's default 1024 tokens includes reasoning and can truncate rule JSON.
+            kwargs["max_completion_tokens"] = 4096
             kwargs["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
@@ -120,32 +124,43 @@ class GroqProvider:
                     "schema": _groq_schema(response_model),
                 },
             }
-        choice = self.client.chat.completions.create(**kwargs).choices[0]
-        message = choice.message
-        if not message.tool_calls and not (message.content or "").strip():
+        # Groq's 400 output_parse_failed describes a failed generation, not a bad input.
+        # Share one retry budget with empty responses; never persist a failed generation.
+        for attempt in range(2):
+            try:
+                scope = operation(event_callback, "model", "retry", model=self.model, message_count=len(kwargs["messages"]), tool_count=len(tools or [])) if attempt else nullcontext({})
+                with scope as payload:
+                    choice = self.client.chat.completions.create(**kwargs).choices[0]
+                    message = choice.message
+                    payload.update(content=message.content, tool_calls=[{"id": call.id, "name": call.function.name, "arguments": call.function.arguments} for call in (message.tool_calls or [])])
+            except BadRequestError as exc:
+                error = exc.body.get("error", exc.body) if isinstance(exc.body, dict) else {}
+                code = error.get("code") if isinstance(error, dict) else None
+                if attempt or code != "output_parse_failed":
+                    raise
+                if event_callback:
+                    event_callback(dict(stage="model", state="warning", operation_id="parse-response",
+                                        payload={"message": "Model output could not be parsed; retrying once.", "error_code": code}))
+                continue
+            if message.tool_calls or (message.content or "").strip():
+                break
+            if attempt:
+                raise ValueError(
+                    f"Model returned no answer or tool calls after one retry "
+                    f"(finish_reason={choice.finish_reason})."
+                )
             if event_callback:
                 event_callback(dict(stage="model", state="warning", operation_id="empty-response",
                                     payload={"message": "Empty model response; retrying once."}))
             kwargs["messages"] = [
                 *messages,
-                {
-                    "role": "system",
-                    "content": (
-                        "Your previous response was empty. Continue with a ledger tool call "
-                        "or a non-empty answer. If the requested information is unavailable, "
-                        "explain the limitation."
-                    ),
-                },
+                {"role": "system", "content": (
+                    "Your previous response was empty. "
+                    + ("Return a non-empty JSON object matching the supplied schema." if response_model else
+                       "Continue with a ledger tool call or a non-empty answer. If the requested "
+                       "information is unavailable, explain the limitation.")
+                )},
             ]
-            with operation(event_callback, "model", "retry", model=self.model, message_count=len(kwargs["messages"]), tool_count=len(tools or [])) as retry:
-                choice = self.client.chat.completions.create(**kwargs).choices[0]
-                message = choice.message
-                retry.update(content=message.content, tool_calls=[{"id": call.id, "name": call.function.name, "arguments": call.function.arguments} for call in (message.tool_calls or [])])
-            if not message.tool_calls and not (message.content or "").strip():
-                raise ValueError(
-                    f"Model returned no answer or tool calls after one retry "
-                    f"(finish_reason={choice.finish_reason})."
-                )
         calls = [
             ToolCall(id=call.id, name=call.function.name, arguments=call.function.arguments)
             for call in (message.tool_calls or [])
@@ -164,6 +179,9 @@ def _system_prompt(session: Session) -> str:
     return (
         "You are a personal finance assistant. Answer only from the supplied ledger tools; "
         "never guess or do arithmetic yourself. Use tools for every financial value. "
+        "For every budget compliance judgment, call check_budget_rule with the configured "
+        "rule ID and requested month. Never infer compliance from transaction totals or "
+        "earlier answers. Use calculate_savings_rate for savings rates. "
         f"The session as-of date is {session.as_of_date.isoformat()}. "
         f"Known categories: {', '.join(categories)}. "
         f"Budget rules: {budget_rules or 'none configured'}."
@@ -221,6 +239,8 @@ def _run_agent(
     session.messages.append({"role": "user", "content": user_question})
     trace: list[TraceEvent] = []
     context_report = ContextReport()
+    compacted_history: list[dict[str, Any]] | None = None
+    compacted_at = 0
 
     for step in range(1, max_steps + 1):
         system = {"role": "system", "content": _system_prompt(session)}
@@ -228,11 +248,25 @@ def _run_agent(
             system["content"] += "\n\n" + system_prompt
         try:
             with operation(emit, "context", f"context-{step}", step=step, strategy=session.context_mode) as context_payload:
-                if context_manager:
+                if compacted_history is not None:
+                    from .context import estimate_tokens
+
+                    messages = [system, *compacted_history, *session.messages[compacted_at:]]
+                    context_report = context_report.model_copy(update={
+                        "before_tokens": estimate_tokens([system, *session.messages]),
+                        "after_tokens": estimate_tokens(messages),
+                        "before_messages": copy.deepcopy([system, *session.messages]) if include_context else [],
+                        "after_messages": copy.deepcopy(messages) if include_context else [],
+                    })
+                    context_payload["reused"] = True
+                elif context_manager:
                     extra = {"event_callback": lambda event: emit({**event, "step": step, "operation_id": f"context-{step}-{event['operation_id']}"})} if emit else {}
                     messages, context_report = context_manager.prepare(
                         system, session, provider, include_messages=include_context, **extra,
                     )
+                    if context_report.strategy != "none":
+                        compacted_history = copy.deepcopy(messages[1:])
+                        compacted_at = len(session.messages)
                 else:
                     messages = [system, *session.messages]
                 context_payload.update(context_report.model_dump(mode="json", exclude={"before_messages", "after_messages"}))

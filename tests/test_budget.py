@@ -3,6 +3,9 @@ from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
+import httpx
+from groq import Groq
+
 from finance_agent.agent import AssistantTurn, GroqProvider
 from finance_agent.budget import BudgetRule, BudgetRuleSet, Operand, parse_budget_rules
 from finance_agent.finance import FinanceData, load_csv
@@ -131,6 +134,7 @@ def test_groq_schema_omits_unsupported_decimal_lookaround_regex() -> None:
 
     schema = completions.kwargs["response_format"]["json_schema"]["schema"]
     assert completions.kwargs["temperature"] == 0
+    assert completions.kwargs["max_completion_tokens"] == 4096
     assert all("(?" not in pattern for pattern in patterns(schema))
 
     def objects(value):
@@ -143,6 +147,22 @@ def test_groq_schema_omits_unsupported_decimal_lookaround_regex() -> None:
 
     assert all(item.get("additionalProperties") is False for item in objects(schema))
     assert all(set(item.get("required", [])) == set(item.get("properties", {})) for item in objects(schema))
+
+
+def test_rule_parser_recovers_real_sdk_parse_error_with_strict_schema_intact():
+    requests = []
+    def respond(request):
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(400, json={"error": {"code": "output_parse_failed", "message": "Parsing failed", "failed_generation": ""}})
+        return httpx.Response(200, json={"id": "test", "object": "chat.completion", "created": 0, "model": "test",
+            "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": FakeParser().chat([], response_model=BudgetRuleSet).content}}]})
+    with Groq(api_key="test", http_client=httpx.Client(transport=httpx.MockTransport(respond))) as client:
+        preview = parse_budget_rules("Save at least 20% of income.", ["groceries"], GroqProvider(client=client))
+    assert preview.rules[0].right.multiplier == Decimal("0.20")
+    assert len(requests) == 2 and requests[0] == requests[1]
+    assert requests[1]["response_format"]["json_schema"]["strict"] is True
+    assert "tools" not in requests[1]
 
 
 def test_savings_target_resolves_against_actual_monthly_income() -> None:
